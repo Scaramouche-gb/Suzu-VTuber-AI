@@ -105,6 +105,7 @@ class LLMClient:
     async def stream_response(
         self,
         messages: list[dict[str, Any]],
+        model: str | None = None,
         timeout_first_token: float = 8.0,
     ) -> AsyncIterator[str]:
         """Stream response tokens with fallback on failure or first-token timeout."""
@@ -113,13 +114,15 @@ class LLMClient:
                 yield token
             return
 
+        target_model = model or self.cfg.chat_model
+
         # Attempt primary model
         try:
-            async for chunk in self._attempt_stream(self.cfg.chat_model, messages, timeout_first_token):
+            async for chunk in self._attempt_stream(target_model, messages, timeout_first_token):
                 yield chunk
             return
         except (litellm.exceptions.APIError, TimeoutError, ConnectionError, OSError, RuntimeError, ValueError) as exc:
-            logger.warning("Primary LLM (%s) failed: %s. Switching to fallback (%s)", self.cfg.chat_model, exc, self.cfg.fallback_model)
+            logger.warning("Primary LLM (%s) failed: %s. Switching to fallback (%s)", target_model, exc, self.cfg.fallback_model)
 
         # Attempt fallback model
         try:
