@@ -1,8 +1,8 @@
 """Unit tests for asyncio event bus."""
 
-import asyncio
 import pytest
-from daemon.bus import EventBus, UserSpeechStart, UserSpeech, PlaybackEnded
+
+from daemon.bus import EventBus, PlaybackEnded, UserSpeech, UserSpeechStart
 
 
 @pytest.mark.asyncio

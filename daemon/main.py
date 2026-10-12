@@ -63,19 +63,28 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.Response(text="ok", content_type="text/plain")
 
 
-def create_app(cfg: Config, bus: EventBus) -> web.Application:
-    """Create and configure aiohttp web application."""
+from daemon.ws_server import WebSocketServer, setup_routes
+
+
+def create_app(cfg: Config, bus: EventBus) -> tuple[web.Application, WebSocketServer]:
+    """Create and configure aiohttp web application with WebSocket server."""
     app = web.Application()
     app["config"] = cfg
     app["bus"] = bus
 
     app.router.add_get("/health", handle_health)
-    return app
+
+    ws_server = WebSocketServer(cfg, bus)
+    setup_routes(app, ws_server)
+    app["ws_server"] = ws_server
+
+    return app, ws_server
 
 
 async def run_server(cfg: Config, bus: EventBus) -> None:
     """Run aiohttp application with graceful shutdown."""
-    app = create_app(cfg, bus)
+    app, ws_server = create_app(cfg, bus)
+    _ = ws_server
     runner = web.AppRunner(app)
     await runner.setup()
 

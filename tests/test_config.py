@@ -1,8 +1,10 @@
 """Unit tests for configuration loader and security constraints."""
 
 from pathlib import Path
+
 import pytest
-from daemon.config import Config, load_config, ServerConfig
+
+from daemon.config import Config, ServerConfig, load_config
 
 
 def test_load_config_defaults() -> None:
