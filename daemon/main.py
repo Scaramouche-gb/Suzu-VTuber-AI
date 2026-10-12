@@ -19,6 +19,7 @@ from daemon.config import Config, load_config
 from daemon.llm import LLMClient
 from daemon.stt import MockSTT, WhisperSTT
 from daemon.tts import create_tts_engine
+from daemon.vision import VisionManager
 from daemon.ws_server import WebSocketServer, setup_routes
 
 logger = logging.getLogger("vtuber")
@@ -123,22 +124,26 @@ async def run_server(
     await site.start()
     logger.info("Daemon web server listening on http://%s:%d", cfg.server.host, cfg.server.port)
 
-    # Initialize STT and Audio In
+    # Initialize STT, Audio In and Vision
     stt = MockSTT() if dry_run else WhisperSTT(cfg.stt)
     audio_in = AudioInManager(cfg.audio_in, bus)
+    vision = VisionManager(cfg.vision, bus)
 
     # Initialize LLM client, TTS engine and Conductor
     llm = LLMClient(cfg.llm, dry_run=dry_run)
     tts = create_tts_engine(cfg.tts, dry_run=dry_run)
-    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus, tts=tts, stt=stt)
+    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus, tts=tts, stt=stt, vision=vision)
     app["conductor"] = conductor
     app["audio_in"] = audio_in
+    app["vision"] = vision
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
 
     if not no_mic:
         audio_in.start(loop)
+    if cfg.vision.enabled:
+        vision.start()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -157,6 +162,8 @@ async def run_server(
             repl_task.cancel()
         if not no_mic:
             await audio_in.stop()
+        if cfg.vision.enabled:
+            await vision.stop()
         logger.info("Shutting down daemon server...")
         await runner.cleanup()
         logger.info("Daemon server stopped")

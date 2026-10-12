@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import time
 from typing import Any
@@ -12,6 +13,7 @@ from daemon.bus import (
     Interrupt,
     PlaybackEnded,
     PlaybackStarted,
+    ScreenChange,
     UserCommand,
     UserSpeech,
     UserSpeechStart,
@@ -35,12 +37,14 @@ class Conductor:
         bus: EventBus,
         tts: BaseTTSEngine | None = None,
         stt: Any | None = None,
+        vision: Any | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
         self.bus = bus
         self.tts = tts
         self.stt = stt
+        self.vision = vision
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -54,6 +58,7 @@ class Conductor:
         self.bus.subscribe(UserCommand, self.handle_user_command)
         self.bus.subscribe(UserSpeechStart, self.handle_user_speech_start)
         self.bus.subscribe(UserSpeech, self.handle_user_speech)
+        self.bus.subscribe(ScreenChange, self.handle_screen_change)
 
     def set_state(self, new_state: str) -> None:
         """Update and broadcast state."""
@@ -116,6 +121,10 @@ class Conductor:
             if self.state == "listening":
                 self.set_state("idle")
 
+    async def handle_screen_change(self, event: ScreenChange) -> None:
+        """Handle noticeable screen content changes."""
+        logger.debug("Conductor received ScreenChange: %s (%s)", event.active_app, event.active_title)
+
     async def process_user_turn(
         self,
         user_text: str,
@@ -126,6 +135,19 @@ class Conductor:
     ) -> None:
         """Handle a complete user message turn with cancellation of stale turns."""
         start_ts = t_start or time.time()
+
+        # Context block from vision
+        if context_info is None and self.vision:
+            context_info = f"активное окно: {self.vision.active_app} ({self.vision.active_title}); {self.vision.screen_context}"
+
+        # Vision Layer 2: Attach screen frame if user asks about screen
+        if image_base64 is None and self.vision and not self.vision.blind_mode:
+            keywords = ("экран", "смотри", "видишь", "что тут", "что здесь", "ошибка", "взгляни", "глянь")
+            if any(kw in user_text.lower() for kw in keywords):
+                latest_frame = self.vision.get_latest_frame()
+                if latest_frame:
+                    image_base64 = base64.b64encode(latest_frame).decode("ascii")
+                    logger.info("Attached live screen frame to user turn query")
 
         # If already generating or thinking, cancel stale task and merge user text
         if self._current_gen_task and not self._current_gen_task.done():
