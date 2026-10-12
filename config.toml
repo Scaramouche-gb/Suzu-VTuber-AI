@@ -1,0 +1,70 @@
+[general]
+name = "Сузу"
+user_name = "Хозяин"
+language = "ru"
+log_level = "INFO"
+
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[llm]
+chat_model = "anthropic/claude-3-5-sonnet-20241022"
+fast_model = "anthropic/claude-3-5-haiku-20241022"
+fallback_model = "ollama/qwen2.5:7b"
+temperature = 0.9
+max_tokens = 300
+max_usd_per_day = 3.0
+
+[stt]
+engine = "faster-whisper"
+model = "large-v3-turbo"
+device = "cuda"
+compute_type = "float16"
+language = ""
+initial_prompt = "Разговор с подругой по имени Сузу."
+
+[audio_in]
+device = ""
+sample_rate = 16000
+vad_threshold = 0.5
+min_speech_ms = 250
+end_silence_ms = 700
+preroll_ms = 300
+
+[tts]
+engine = "edge"
+voice = "ru-RU-SvetlanaNeural"
+rate = "+5%"
+pitch = "+2Hz"
+
+[vision]
+enabled = true
+output = ""
+interval_s = 1.0
+scale = 0.4
+jpeg_quality = 70
+change_threshold = 0.08
+send_cooldown_s = 25
+max_vlm_calls_per_hour = 60
+blacklist_app_ids = ["org.keepassxc.KeePassXC", "bitwarden", "telegram", "org.telegram.desktop"]
+blacklist_title_globs = ["*Bank*", "*Банк*", "*пароль*", "*password*"]
+
+[initiative]
+enabled = true
+mean_interval_s = 180
+min_gap_s = 45
+quiet_hours = ["01:00-08:00"]
+backoff_factor = 2.0
+max_backoff_s = 1800
+
+[memory]
+db_path = "~/.local/share/vtuber/memory.db"
+context_turns = 12
+summarize_every = 20
+
+[avatar]
+model = "models/avatar.vrm"
+fps = 30
+scale = 1.0
+y_offset = 0.0
