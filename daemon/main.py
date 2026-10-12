@@ -13,7 +13,10 @@ from pathlib import Path
 from aiohttp import web
 
 from daemon.bus import EventBus
+from daemon.conductor import Conductor
 from daemon.config import Config, load_config
+from daemon.llm import LLMClient
+from daemon.ws_server import WebSocketServer, setup_routes
 
 logger = logging.getLogger("vtuber")
 
@@ -63,9 +66,6 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.Response(text="ok", content_type="text/plain")
 
 
-from daemon.ws_server import WebSocketServer, setup_routes
-
-
 def create_app(cfg: Config, bus: EventBus) -> tuple[web.Application, WebSocketServer]:
     """Create and configure aiohttp web application with WebSocket server."""
     app = web.Application()
@@ -81,16 +81,43 @@ def create_app(cfg: Config, bus: EventBus) -> tuple[web.Application, WebSocketSe
     return app, ws_server
 
 
-async def run_server(cfg: Config, bus: EventBus) -> None:
-    """Run aiohttp application with graceful shutdown."""
+async def text_repl_loop(conductor: Conductor, stop_event: asyncio.Event) -> None:
+    """Interactive command-line loop for text chat mode (Phase 2)."""
+    print("\n=== Suzu VTuber Text Mode ===")
+    print("Вводите сообщения в терминале. Для выхода нажмите Ctrl+C или введите 'exit'.\n")
+
+    while not stop_event.is_set():
+        try:
+            line = await asyncio.to_thread(input, f"[{conductor.llm.cfg.chat_model.split('/')[-1]}] Вы: ")
+            text = line.strip()
+            if not text:
+                continue
+            if text.lower() in ("exit", "quit"):
+                stop_event.set()
+                break
+
+            await conductor.process_user_turn(text)
+        except (EOFError, KeyboardInterrupt):
+            stop_event.set()
+            break
+        except asyncio.CancelledError:
+            break
+
+
+async def run_server(cfg: Config, bus: EventBus, text_mode: bool = False, dry_run: bool = False) -> None:
+    """Run aiohttp application with graceful shutdown and optional CLI loop."""
     app, ws_server = create_app(cfg, bus)
-    _ = ws_server
     runner = web.AppRunner(app)
     await runner.setup()
 
     site = web.TCPSite(runner, host=cfg.server.host, port=cfg.server.port)
     await site.start()
     logger.info("Daemon web server listening on http://%s:%d", cfg.server.host, cfg.server.port)
+
+    # Initialize LLM client and Conductor
+    llm = LLMClient(cfg.llm, dry_run=dry_run)
+    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus)
+    app["conductor"] = conductor
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -101,9 +128,15 @@ async def run_server(cfg: Config, bus: EventBus) -> None:
         except (NotImplementedError, RuntimeError):
             pass
 
+    repl_task: asyncio.Task[None] | None = None
+    if text_mode:
+        repl_task = asyncio.create_task(text_repl_loop(conductor, stop_event))
+
     try:
         await stop_event.wait()
     finally:
+        if repl_task and not repl_task.done():
+            repl_task.cancel()
         logger.info("Shutting down daemon server...")
         await runner.cleanup()
         logger.info("Daemon server stopped")
@@ -129,7 +162,7 @@ def main() -> None:
     bus = EventBus()
 
     try:
-        asyncio.run(run_server(cfg, bus))
+        asyncio.run(run_server(cfg, bus, text_mode=args.text, dry_run=args.dry_run_llm))
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Daemon terminated by user")
 
