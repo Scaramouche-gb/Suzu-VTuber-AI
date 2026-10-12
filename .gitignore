@@ -60,3 +60,6 @@ secrets.env
 .cache/
 tmp/
 project_dump.xml
+*.mp3
+*.zip
+

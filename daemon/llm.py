@@ -28,6 +28,16 @@ class BudgetTracker:
         self.spent_usd = 0.0
         self.budget_exceeded = False
 
+    @property
+    def daily_spent(self) -> float:
+        return self.spent_usd
+
+    def is_exceeded(self) -> bool:
+        return self.budget_exceeded
+
+    def is_budget_exceeded(self) -> bool:
+        return self.budget_exceeded
+
     def add_cost(self, cost: float) -> None:
         today = datetime.now().date()
         if today != self.current_day:
@@ -41,6 +51,7 @@ class BudgetTracker:
         if self.spent_usd >= self.max_usd_per_day and not self.budget_exceeded:
             self.budget_exceeded = True
             logger.warning("Daily LLM budget of $%.2f exceeded! Restricting background tasks.", self.max_usd_per_day)
+
 
 
 class LLMClient:

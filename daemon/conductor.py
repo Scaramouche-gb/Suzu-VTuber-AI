@@ -9,6 +9,8 @@ import logging
 import time
 from typing import Any
 
+import aiohttp
+
 from daemon.bus import (
     EventBus,
     Interrupt,
@@ -434,7 +436,7 @@ class Conductor:
                 if audio_bytes:
                     save_audio_file(utt_id, audio_bytes)
                     audio_url = f"/audio/{utt_id}.mp3"
-            except (OSError, RuntimeError, ConnectionError, TimeoutError) as exc:
+            except (aiohttp.ClientError, OSError, RuntimeError, ConnectionError, TimeoutError) as exc:
                 logger.warning("TTS synthesis failed for utterance %s: %s", utt_id, exc)
 
         say_payload: dict[str, Any] = {

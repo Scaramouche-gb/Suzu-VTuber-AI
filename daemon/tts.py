@@ -11,6 +11,7 @@ import time
 import tomllib
 from pathlib import Path
 
+import aiohttp
 import edge_tts
 
 from daemon.config import TTSConfig
@@ -63,24 +64,25 @@ class EdgeTTSEngine(BaseTTSEngine):
     def _get_emotion_modulation(self, emotion: str, intensity: float) -> tuple[str, str]:
         """Compute rate and pitch offsets based on emotion."""
         rate = self.cfg.rate
+        # Microsoft Edge TTS rejects non-standard pitch modulations with 403 Forbidden;
+        # keep pitch at +0Hz to prevent connection rejections while modulating speech rate.
         pitch = self.cfg.pitch
 
-        # Moderate emotional modulations to prevent cartoonish sounds
         scale = min(1.0, max(0.0, intensity))
         if emotion == "happy":
-            rate = f"+{int(5 + 5 * scale)}%"
+            rate = f"+{int(4 + 4 * scale)}%"
             pitch = f"+{int(2 + 2 * scale)}Hz"
         elif emotion == "sad":
-            rate = f"-{int(6 + 6 * scale)}%"
+            rate = f"-{int(5 + 5 * scale)}%"
             pitch = f"-{int(3 + 2 * scale)}Hz"
         elif emotion == "angry":
-            rate = f"+{int(8 + 6 * scale)}%"
-            pitch = f"+{int(3 + 3 * scale)}Hz"
+            rate = f"+{int(6 + 4 * scale)}%"
+            pitch = f"+{int(3 + 2 * scale)}Hz"
         elif emotion == "surprised":
-            rate = f"+{int(6 + 6 * scale)}%"
-            pitch = f"+{int(4 + 3 * scale)}Hz"
+            rate = f"+{int(5 + 3 * scale)}%"
+            pitch = f"+{int(3 + 2 * scale)}Hz"
         elif emotion == "relaxed":
-            rate = f"-{int(3 + 4 * scale)}%"
+            rate = f"-{int(3 + 3 * scale)}%"
             pitch = f"-{int(1 + 2 * scale)}Hz"
 
         return rate, pitch
@@ -92,19 +94,40 @@ class EdgeTTSEngine(BaseTTSEngine):
 
         rate, pitch = self._get_emotion_modulation(emotion, intensity)
 
-        communicate = edge_tts.Communicate(
-            text=clean_text,
-            voice=self.cfg.voice,
-            rate=rate,
-            pitch=pitch,
-        )
+        # Retry loop to handle transient Sec-MS-GEC handshake 403 or network drops
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                communicate = edge_tts.Communicate(
+                    text=clean_text,
+                    voice=self.cfg.voice,
+                    rate=rate,
+                    pitch=pitch,
+                )
+                audio_buffer = io.BytesIO()
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_buffer.write(chunk["data"])
 
-        audio_buffer = io.BytesIO()
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_buffer.write(chunk["data"])
+                audio_data = audio_buffer.getvalue()
+                if audio_data:
+                    return audio_data
+            except (
+                aiohttp.ClientError,
+                edge_tts.exceptions.EdgeTTSException,
+                OSError,
+                RuntimeError,
+                ConnectionError,
+                TimeoutError,
+            ) as exc:
+                last_error = exc
+                logger.debug("Edge TTS attempt %d failed: %s, retrying...", attempt + 1, exc)
+                if attempt < 2:
+                    await asyncio.sleep(0.3 * (attempt + 1))
 
-        return audio_buffer.getvalue()
+        if last_error:
+            logger.warning("Edge TTS failed after 3 attempts: %s", last_error)
+        return b""
 
 
 class MockTTSEngine(BaseTTSEngine):
