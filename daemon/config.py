@@ -38,12 +38,14 @@ class ServerConfig(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    chat_model: str = "anthropic/claude-3-5-sonnet-20241022"
-    fast_model: str = "anthropic/claude-3-5-haiku-20241022"
-    fallback_model: str = "ollama/qwen2.5:7b"
-    temperature: float = 0.9
+    chat_model: str = "openai/claude-sonnet-5-5"
+    fast_model: str = "openai/claude-haiku-4-5-20251001"
+    fallback_model: str = "openai/claude-haiku-4-5-20251001"
+    api_base: str = "https://codex.sale/v1"
+    api_key: str = ""
+    temperature: float = 0.8
     max_tokens: int = 300
-    max_usd_per_day: float = 3.0
+    max_usd_per_day: float = 10.0
 
 
 class STTConfig(BaseModel):

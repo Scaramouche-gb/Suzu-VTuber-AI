@@ -63,9 +63,18 @@ export class LipsyncManager {
     this.currentUtteranceId = item.id;
 
     try {
-      const response = await fetch(item.audioUrl);
+      this.ensureContext();
+      if (this.audioContext && this.audioContext.state === 'suspended') {
+        await this.audioContext.resume();
+      }
+
+      const audioUrl = item.audioUrl.startsWith('http')
+        ? item.audioUrl
+        : `http://127.0.0.1:8765${item.audioUrl}`;
+
+      const response = await fetch(audioUrl);
       if (!response.ok) {
-        throw new Error(`Failed to fetch audio: ${response.statusText}`);
+        throw new Error(`Failed to fetch audio from ${audioUrl}: ${response.statusText}`);
       }
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);

@@ -9,6 +9,7 @@ import signal
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 from aiohttp import web
 
@@ -72,9 +73,25 @@ async def handle_health(request: web.Request) -> web.Response:
     return web.Response(text="ok", content_type="text/plain")
 
 
+@web.middleware
+async def cors_middleware(request: web.Request, handler: Any) -> web.Response:
+    """Allow CORS for local web renderer on port 5173 or overlay webviews."""
+    if request.method == "OPTIONS":
+        response = web.Response()
+    else:
+        try:
+            response = await handler(request)
+        except web.HTTPException as ex:
+            response = ex
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    return response
+
+
 def create_app(cfg: Config, bus: EventBus) -> tuple[web.Application, WebSocketServer]:
     """Create and configure aiohttp web application with WebSocket server."""
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app["config"] = cfg
     app["bus"] = bus
 

@@ -9,12 +9,13 @@ host = "127.0.0.1"
 port = 8765
 
 [llm]
-chat_model = "anthropic/claude-3-5-sonnet-20241022"
-fast_model = "anthropic/claude-3-5-haiku-20241022"
-fallback_model = "ollama/qwen2.5:7b"
-temperature = 0.9
+chat_model = "openai/claude-sonnet-5-5"
+fast_model = "openai/claude-haiku-4-5-20251001"
+fallback_model = "openai/claude-haiku-4-5-20251001"
+api_base = "https://codex.sale/v1"
+temperature = 0.8
 max_tokens = 300
-max_usd_per_day = 3.0
+max_usd_per_day = 10.0
 
 [stt]
 engine = "faster-whisper"

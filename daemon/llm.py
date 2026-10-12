@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
@@ -142,13 +143,24 @@ class LLMClient:
         messages: list[dict[str, Any]],
         timeout_first_token: float,
     ) -> AsyncIterator[str]:
-        response = await litellm.acompletion(
-            model=model,
-            messages=messages,
-            temperature=self.cfg.temperature,
-            max_tokens=self.cfg.max_tokens,
-            stream=True,
-        )
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": self.cfg.max_tokens,
+            "stream": True,
+        }
+        if "claude" not in model.lower() and self.cfg.temperature != 1.0:
+            kwargs["temperature"] = self.cfg.temperature
+
+        api_base = getattr(self.cfg, "api_base", "") or os.environ.get("OPENAI_API_BASE", "")
+        if api_base:
+            kwargs["api_base"] = api_base
+
+        api_key = getattr(self.cfg, "api_key", "") or os.environ.get("OPENAI_API_KEY", "")
+        if api_key:
+            kwargs["api_key"] = api_key
+
+        response = await litellm.acompletion(**kwargs)
 
         first_token_received = False
         full_completion_content: list[str] = []
