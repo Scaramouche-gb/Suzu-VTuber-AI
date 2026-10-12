@@ -1,0 +1,220 @@
+"""Microphone input capture, Silero VAD with hysteresis, pre-roll buffer and barge-in."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections import deque
+from typing import Any
+
+import numpy as np
+import sounddevice as sd
+import torch
+
+from daemon.bus import EventBus, PlaybackEnded, PlaybackStarted, UserSpeech, UserSpeechStart
+from daemon.config import AudioInConfig
+
+logger = logging.getLogger(__name__)
+
+FRAME_SIZE = 512  # 32ms @ 16kHz
+SAMPLE_RATE = 16000
+
+
+class AudioInManager:
+    """Captures microphone audio, applies Silero VAD and emits speech events."""
+
+    def __init__(self, cfg: AudioInConfig, bus: EventBus) -> None:
+        self.cfg = cfg
+        self.bus = bus
+        self.mode = "always"  # "always" | "push-to-talk" | "muted"
+        self.ptt_active = False
+
+        self._vad_model: Any = None
+        self._is_speaking_tts = False
+        self._running = False
+        self._stream: sd.InputStream | None = None
+        self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
+        self._process_task: asyncio.Task[None] | None = None
+
+        # Pre-roll ring buffer: 300ms = ~10 frames of 512 samples
+        self._preroll_frames_count = max(1, int((cfg.preroll_ms / 1000.0) * (SAMPLE_RATE / FRAME_SIZE)))
+        self._preroll_buffer: deque[np.ndarray] = deque(maxlen=self._preroll_frames_count)
+
+        # Bus subscriptions for echo threshold adaptation
+        self.bus.subscribe(PlaybackStarted, self._on_playback_started)
+        self.bus.subscribe(PlaybackEnded, self._on_playback_ended)
+
+    async def _on_playback_started(self, event: PlaybackStarted) -> None:
+        self._is_speaking_tts = True
+
+    async def _on_playback_ended(self, event: PlaybackEnded) -> None:
+        self._is_speaking_tts = False
+
+    def load_vad_model(self) -> Any:
+        """Lazy load Silero VAD model."""
+        if self._vad_model is None:
+            logger.info("Loading Silero VAD model...")
+            try:
+                # Silero VAD via torch hub or silero_vad package
+                from silero_vad import load_silero_vad
+                self._vad_model = load_silero_vad()
+            except ImportError:
+                model, _ = torch.hub.load(
+                    repo_or_dir="snakers4/silero-vad",
+                    model="silero_vad",
+                    force_reload=False,
+                    trust_repo=True,
+                )
+                self._vad_model = model
+            logger.info("Silero VAD model loaded successfully")
+        return self._vad_model
+
+    def set_mode(self, mode: str) -> None:
+        """Change listening mode: always | push-to-talk | muted."""
+        self.mode = mode
+        logger.info("Audio input mode set to '%s'", mode)
+
+    def set_push_to_talk(self, active: bool) -> None:
+        self.ptt_active = active
+
+    def start(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Start sounddevice audio stream and processing loop."""
+        if self._running:
+            return
+
+        self._running = True
+        self.load_vad_model()
+
+        def audio_callback(indata: np.ndarray, frames: int, time_info: Any, status: sd.CallbackFlags) -> None:
+            if status:
+                logger.warning("sounddevice status: %s", status)
+            # Copy float32 audio frame to queue
+            frame = indata[:, 0].copy()
+            loop.call_soon_threadsafe(self._queue.put_nowait, frame)
+
+        try:
+            device = self.cfg.device if self.cfg.device else None
+            self._stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                blocksize=FRAME_SIZE,
+                dtype="float32",
+                device=device,
+                callback=audio_callback,
+            )
+            self._stream.start()
+            logger.info("Audio capture started (device: %s, sample_rate: %d)", device or "default", SAMPLE_RATE)
+            self._process_task = asyncio.create_task(self._vad_loop())
+        except (sd.PortAudioError, OSError, RuntimeError) as exc:
+            logger.error("Failed to start sounddevice InputStream: %s", exc)
+            self._running = False
+
+    async def stop(self) -> None:
+        """Stop audio capture."""
+        self._running = False
+        if self._stream:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except (sd.PortAudioError, OSError) as exc:
+                logger.debug("Error stopping audio stream: %s", exc)
+            self._stream = None
+
+        if self._process_task and not self._process_task.done():
+            self._process_task.cancel()
+            self._process_task = None
+        logger.info("Audio capture stopped")
+
+    async def _vad_loop(self) -> None:
+        """VAD processing loop with hysteresis, pre-roll and speech accumulation."""
+        is_in_speech = False
+        consecutive_speech_frames = 0
+        silence_duration_ms = 0.0
+        speech_frames: list[np.ndarray] = []
+
+        consecutive_required = 2
+        frame_duration_ms = (FRAME_SIZE / SAMPLE_RATE) * 1000.0  # 32 ms
+
+        while self._running:
+            try:
+                frame = await self._queue.get()
+            except asyncio.CancelledError:
+                break
+
+            # Handle muted and push-to-talk modes
+            if self.mode == "muted":
+                self._preroll_buffer.clear()
+                is_in_speech = False
+                continue
+
+            if self.mode == "push-to-talk" and not self.ptt_active:
+                self._preroll_buffer.clear()
+                if is_in_speech:
+                    # User released PTT, finish phrase
+                    await self._finish_phrase(speech_frames)
+                    speech_frames = []
+                    is_in_speech = False
+                continue
+
+            # Compute threshold (boost during TTS speech for echo rejection)
+            base_threshold = self.cfg.vad_threshold
+            threshold = 0.85 if self._is_speaking_tts else base_threshold
+
+            # Evaluate VAD probability
+            tensor_frame = torch.from_numpy(frame)
+            try:
+                prob = self._vad_model(tensor_frame, SAMPLE_RATE).item()
+            except (RuntimeError, ValueError):
+                prob = 0.0
+
+            if not is_in_speech:
+                self._preroll_buffer.append(frame)
+
+                if prob >= threshold:
+                    consecutive_speech_frames += 1
+                else:
+                    consecutive_speech_frames = 0
+
+                if consecutive_speech_frames >= consecutive_required:
+                    # Voice activity detected!
+                    is_in_speech = True
+                    consecutive_speech_frames = 0
+                    silence_duration_ms = 0.0
+                    speech_frames = list(self._preroll_buffer)
+                    self._preroll_buffer.clear()
+
+                    logger.debug("VAD: User speech started (prob=%.2f)", prob)
+                    await self.bus.publish(UserSpeechStart())
+
+            else:
+                speech_frames.append(frame)
+
+                if prob < threshold:
+                    silence_duration_ms += frame_duration_ms
+                else:
+                    silence_duration_ms = 0.0
+
+                current_total_duration_ms = len(speech_frames) * frame_duration_ms
+
+                # Check if silence threshold exceeded OR max phrase duration (30s) reached
+                if silence_duration_ms >= self.cfg.end_silence_ms or current_total_duration_ms >= 30000.0:
+                    await self._finish_phrase(speech_frames)
+                    speech_frames = []
+                    is_in_speech = False
+                    silence_duration_ms = 0.0
+
+    async def _finish_phrase(self, frames: list[np.ndarray]) -> None:
+        if not frames:
+            return
+
+        total_audio = np.concatenate(frames)
+        duration_s = len(total_audio) / SAMPLE_RATE
+
+        # Reject short clicks (< min_speech_ms)
+        min_speech_s = self.cfg.min_speech_ms / 1000.0
+        if duration_s < min_speech_s:
+            logger.debug("VAD: Rejected brief click (%.2fs < %.2fs)", duration_s, min_speech_s)
+            return
+
+        logger.info("VAD: Captured user phrase (duration: %.2fs)", duration_s)
+        await self.bus.publish(UserSpeech(audio_data=total_audio, duration_s=duration_s))

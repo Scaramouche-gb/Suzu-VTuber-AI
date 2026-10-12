@@ -12,10 +12,12 @@ from pathlib import Path
 
 from aiohttp import web
 
+from daemon.audio_in import AudioInManager
 from daemon.bus import EventBus
 from daemon.conductor import Conductor
 from daemon.config import Config, load_config
 from daemon.llm import LLMClient
+from daemon.stt import MockSTT, WhisperSTT
 from daemon.tts import create_tts_engine
 from daemon.ws_server import WebSocketServer, setup_routes
 
@@ -105,7 +107,13 @@ async def text_repl_loop(conductor: Conductor, stop_event: asyncio.Event) -> Non
             break
 
 
-async def run_server(cfg: Config, bus: EventBus, text_mode: bool = False, dry_run: bool = False) -> None:
+async def run_server(
+    cfg: Config,
+    bus: EventBus,
+    text_mode: bool = False,
+    dry_run: bool = False,
+    no_mic: bool = False,
+) -> None:
     """Run aiohttp application with graceful shutdown and optional CLI loop."""
     app, ws_server = create_app(cfg, bus)
     runner = web.AppRunner(app)
@@ -115,14 +123,22 @@ async def run_server(cfg: Config, bus: EventBus, text_mode: bool = False, dry_ru
     await site.start()
     logger.info("Daemon web server listening on http://%s:%d", cfg.server.host, cfg.server.port)
 
+    # Initialize STT and Audio In
+    stt = MockSTT() if dry_run else WhisperSTT(cfg.stt)
+    audio_in = AudioInManager(cfg.audio_in, bus)
+
     # Initialize LLM client, TTS engine and Conductor
     llm = LLMClient(cfg.llm, dry_run=dry_run)
     tts = create_tts_engine(cfg.tts, dry_run=dry_run)
-    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus, tts=tts)
+    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus, tts=tts, stt=stt)
     app["conductor"] = conductor
+    app["audio_in"] = audio_in
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
+
+    if not no_mic:
+        audio_in.start(loop)
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -139,6 +155,8 @@ async def run_server(cfg: Config, bus: EventBus, text_mode: bool = False, dry_ru
     finally:
         if repl_task and not repl_task.done():
             repl_task.cancel()
+        if not no_mic:
+            await audio_in.stop()
         logger.info("Shutting down daemon server...")
         await runner.cleanup()
         logger.info("Daemon server stopped")
@@ -149,6 +167,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, default="config.toml", help="Path to config.toml")
     parser.add_argument("--text", action="store_true", help="Run in interactive text mode (Phase 2)")
     parser.add_argument("--dry-run-llm", action="store_true", help="Mock LLM responses for testing")
+    parser.add_argument("--no-mic", action="store_true", help="Disable microphone input capture")
     return parser.parse_args()
 
 
@@ -164,7 +183,15 @@ def main() -> None:
     bus = EventBus()
 
     try:
-        asyncio.run(run_server(cfg, bus, text_mode=args.text, dry_run=args.dry_run_llm))
+        asyncio.run(
+            run_server(
+                cfg,
+                bus,
+                text_mode=args.text,
+                dry_run=args.dry_run_llm,
+                no_mic=args.no_mic,
+            )
+        )
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.info("Daemon terminated by user")
 

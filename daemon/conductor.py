@@ -6,7 +6,15 @@ import asyncio
 import logging
 from typing import Any
 
-from daemon.bus import EventBus, Interrupt, PlaybackEnded, PlaybackStarted, UserCommand
+from daemon.bus import (
+    EventBus,
+    Interrupt,
+    PlaybackEnded,
+    PlaybackStarted,
+    UserCommand,
+    UserSpeech,
+    UserSpeechStart,
+)
 from daemon.llm import LLMClient
 from daemon.sentence import SentenceChunk, SentenceSplitter
 from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
@@ -25,11 +33,13 @@ class Conductor:
         ws_server: WebSocketServer,
         bus: EventBus,
         tts: BaseTTSEngine | None = None,
+        stt: Any | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
         self.bus = bus
         self.tts = tts
+        self.stt = stt
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -41,6 +51,8 @@ class Conductor:
         self.bus.subscribe(PlaybackStarted, self.handle_playback_started)
         self.bus.subscribe(PlaybackEnded, self.handle_playback_ended)
         self.bus.subscribe(UserCommand, self.handle_user_command)
+        self.bus.subscribe(UserSpeechStart, self.handle_user_speech_start)
+        self.bus.subscribe(UserSpeech, self.handle_user_speech)
 
     def set_state(self, new_state: str) -> None:
         """Update and broadcast state."""
@@ -75,6 +87,28 @@ class Conductor:
                 await self.ws.broadcast({"type": "gesture", "name": "nod"})
             else:
                 await self.ws.broadcast({"type": "gesture", "name": "shrug"})
+
+    async def handle_user_speech_start(self, event: UserSpeechStart) -> None:
+        """User started speaking; immediately interrupt active speech and transition to listening."""
+        if self.state in ("speaking", "thinking"):
+            await self.bus.publish(Interrupt(reason="user_speech_start"))
+        self.set_state("listening")
+
+    async def handle_user_speech(self, event: UserSpeech) -> None:
+        """Transcribe speech audio or process text, then trigger user turn."""
+        text = event.text
+        if not text and event.audio_data is not None and self.stt:
+            try:
+                text = await asyncio.to_thread(self.stt.transcribe, event.audio_data)
+            except (RuntimeError, ValueError, OSError) as exc:
+                logger.warning("STT transcription failed: %s", exc)
+                text = ""
+
+        if text.strip():
+            await self.process_user_turn(text.strip())
+        else:
+            if self.state == "listening":
+                self.set_state("idle")
 
     async def process_user_turn(
         self,
@@ -145,6 +179,8 @@ class Conductor:
             if reply_str:
                 self.history.append({"role": "user", "content": user_text})
                 self.history.append({"role": "assistant", "content": reply_str})
+                if self.stt:
+                    self.stt.set_last_avatar_phrase(reply_str)
 
         except asyncio.CancelledError:
             logger.info("Turn generation was cancelled (barge-in)")
