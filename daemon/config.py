@@ -71,6 +71,7 @@ class TTSConfig(BaseModel):
     voice: str = "ru-RU-SvetlanaNeural"
     rate: str = "+5%"
     pitch: str = "+2Hz"
+    pitch_shift: float = 1.15
 
 
 class VisionConfig(BaseModel):

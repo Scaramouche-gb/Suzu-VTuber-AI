@@ -12,6 +12,8 @@ from typing import Any
 
 import litellm
 
+litellm.drop_params = True
+
 from daemon.config import LLMConfig
 
 logger = logging.getLogger(__name__)

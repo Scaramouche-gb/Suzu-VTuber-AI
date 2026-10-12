@@ -7,6 +7,7 @@ import asyncio
 import io
 import logging
 import re
+import subprocess
 import time
 import tomllib
 from pathlib import Path
@@ -111,6 +112,9 @@ class EdgeTTSEngine(BaseTTSEngine):
 
                 audio_data = audio_buffer.getvalue()
                 if audio_data:
+                    shift = getattr(self.cfg, "pitch_shift", 1.0)
+                    if shift != 1.0:
+                        audio_data = self._apply_pitch_shift(audio_data, shift)
                     return audio_data
             except (
                 aiohttp.ClientError,
@@ -128,6 +132,30 @@ class EdgeTTSEngine(BaseTTSEngine):
         if last_error:
             logger.warning("Edge TTS failed after 3 attempts: %s", last_error)
         return b""
+
+    def _apply_pitch_shift(self, audio_bytes: bytes, shift: float) -> bytes:
+        """Post-process audio with FFmpeg to create bright anime voice tone."""
+        if shift == 1.0 or not audio_bytes:
+            return audio_bytes
+        try:
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                "pipe:0",
+                "-af",
+                f"asetrate=24000*{shift},aresample=24000,atempo={1.0 / shift},volume=1.15",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+            proc = subprocess.run(cmd, input=audio_bytes, capture_output=True, check=False)
+            if proc.returncode == 0 and proc.stdout:
+                return proc.stdout
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.warning("FFmpeg pitch shifting failed: %s", exc)
+        return audio_bytes
+
 
 
 class MockTTSEngine(BaseTTSEngine):

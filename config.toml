@@ -9,8 +9,8 @@ host = "127.0.0.1"
 port = 8765
 
 [llm]
-chat_model = "openai/claude-sonnet-5-5"
-fast_model = "openai/claude-haiku-4-5-20251001"
+chat_model = "openai/gpt-5.6-luna"
+fast_model = "openai/gpt-5.6-luna"
 fallback_model = "openai/claude-haiku-4-5-20251001"
 api_base = "https://codex.sale/v1"
 temperature = 0.8
@@ -38,6 +38,7 @@ engine = "edge"
 voice = "ru-RU-SvetlanaNeural"
 rate = "+5%"
 pitch = "+2Hz"
+pitch_shift = 1.15
 
 [vision]
 enabled = true
@@ -53,11 +54,11 @@ blacklist_title_globs = ["*Bank*", "*Банк*", "*пароль*", "*password*"]
 
 [initiative]
 enabled = true
-mean_interval_s = 180
-min_gap_s = 45
-quiet_hours = ["01:00-08:00"]
-backoff_factor = 2.0
-max_backoff_s = 1800
+mean_interval_s = 60
+min_gap_s = 25
+quiet_hours = []
+backoff_factor = 1.5
+max_backoff_s = 600
 
 [memory]
 db_path = "~/.local/share/vtuber/memory.db"
