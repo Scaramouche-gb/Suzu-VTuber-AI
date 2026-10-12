@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from daemon.bus import (
@@ -96,6 +97,7 @@ class Conductor:
 
     async def handle_user_speech(self, event: UserSpeech) -> None:
         """Transcribe speech audio or process text, then trigger user turn."""
+        t_speech_end = time.time()
         text = event.text
         if not text and event.audio_data is not None and self.stt:
             try:
@@ -104,8 +106,12 @@ class Conductor:
                 logger.warning("STT transcription failed: %s", exc)
                 text = ""
 
-        if text.strip():
-            await self.process_user_turn(text.strip())
+        t_stt_done = time.time()
+        vad_stt_ms = (t_stt_done - t_speech_end) * 1000.0
+
+        clean_text = text.strip()
+        if clean_text:
+            await self.process_user_turn(clean_text, vad_stt_ms=vad_stt_ms, t_start=t_speech_end)
         else:
             if self.state == "listening":
                 self.set_state("idle")
@@ -115,14 +121,19 @@ class Conductor:
         user_text: str,
         context_info: str | None = None,
         image_base64: str | None = None,
+        vad_stt_ms: float = 0.0,
+        t_start: float | None = None,
     ) -> None:
-        """Handle a complete user message turn."""
-        # Cancel previous generation if still running
+        """Handle a complete user message turn with cancellation of stale turns."""
+        start_ts = t_start or time.time()
+
+        # If already generating or thinking, cancel stale task and merge user text
         if self._current_gen_task and not self._current_gen_task.done():
+            logger.info("Canceling ongoing turn to process new user utterance")
             self._current_gen_task.cancel()
 
         self._current_gen_task = asyncio.create_task(
-            self._generate_turn(user_text, context_info, image_base64)
+            self._generate_turn(user_text, context_info, image_base64, vad_stt_ms, start_ts)
         )
         await self._current_gen_task
 
@@ -131,8 +142,11 @@ class Conductor:
         user_text: str,
         context_info: str | None,
         image_base64: str | None,
+        vad_stt_ms: float = 0.0,
+        start_ts: float | None = None,
     ) -> None:
         self.set_state("thinking")
+        t_turn_start = start_ts or time.time()
 
         messages = self.llm.build_messages(
             user_message=user_text,
@@ -145,20 +159,30 @@ class Conductor:
         sentence_splitter = SentenceSplitter()
         full_reply_text: list[str] = []
 
+        first_token_received = False
+        first_audio_dispatched = False
+        t_first_token = 0.0
+        t_first_audio = 0.0
+
         try:
             async for token in self.llm.stream_response(messages):
+                if not first_token_received:
+                    first_token_received = True
+                    t_first_token = time.time()
+
                 # 1. Parse tags from token
                 parsed_items = tag_parser.feed(token)
 
                 for item in parsed_items:
                     if isinstance(item, str):
                         full_reply_text.append(item)
-                        # Feed speech text into sentence splitter
                         ready_chunks = sentence_splitter.feed(item)
                         for chunk in ready_chunks:
                             await self._dispatch_sentence_chunk(chunk)
+                            if not first_audio_dispatched:
+                                first_audio_dispatched = True
+                                t_first_audio = time.time()
                     else:
-                        # Process tag item immediately
                         await self._handle_tag(item, sentence_splitter)
 
             # Flush remaining buffers
@@ -181,6 +205,18 @@ class Conductor:
                 self.history.append({"role": "assistant", "content": reply_str})
                 if self.stt:
                     self.stt.set_last_avatar_phrase(reply_str)
+
+                if first_audio_dispatched:
+                    llm_token_ms = (t_first_token - t_turn_start) * 1000.0 if t_first_token else 0.0
+                    tts_audio_ms = (t_first_audio - t_first_token) * 1000.0 if (t_first_audio and t_first_token) else 0.0
+                    total_ms = (t_first_audio - t_turn_start) * 1000.0
+                    logger.info(
+                        "[Latency Budget] VAD+STT: %.0fms | LLM 1st Token: %.0fms | TTS 1st Audio: %.0fms | Total: %.0fms",
+                        vad_stt_ms,
+                        llm_token_ms,
+                        tts_audio_ms,
+                        total_ms,
+                    )
 
         except asyncio.CancelledError:
             logger.info("Turn generation was cancelled (barge-in)")
