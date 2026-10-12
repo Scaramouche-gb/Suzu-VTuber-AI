@@ -16,6 +16,7 @@ from daemon.bus import EventBus
 from daemon.conductor import Conductor
 from daemon.config import Config, load_config
 from daemon.llm import LLMClient
+from daemon.tts import create_tts_engine
 from daemon.ws_server import WebSocketServer, setup_routes
 
 logger = logging.getLogger("vtuber")
@@ -114,9 +115,10 @@ async def run_server(cfg: Config, bus: EventBus, text_mode: bool = False, dry_ru
     await site.start()
     logger.info("Daemon web server listening on http://%s:%d", cfg.server.host, cfg.server.port)
 
-    # Initialize LLM client and Conductor
+    # Initialize LLM client, TTS engine and Conductor
     llm = LLMClient(cfg.llm, dry_run=dry_run)
-    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus)
+    tts = create_tts_engine(cfg.tts, dry_run=dry_run)
+    conductor = Conductor(llm=llm, ws_server=ws_server, bus=bus, tts=tts)
     app["conductor"] = conductor
 
     stop_event = asyncio.Event()

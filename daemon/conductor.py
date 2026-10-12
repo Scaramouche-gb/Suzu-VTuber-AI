@@ -10,6 +10,7 @@ from daemon.bus import EventBus, Interrupt, PlaybackEnded, PlaybackStarted, User
 from daemon.llm import LLMClient
 from daemon.sentence import SentenceChunk, SentenceSplitter
 from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
+from daemon.tts import BaseTTSEngine, save_audio_file
 from daemon.ws_server import WebSocketServer
 
 logger = logging.getLogger(__name__)
@@ -18,10 +19,17 @@ logger = logging.getLogger(__name__)
 class Conductor:
     """Orchestrates dialogue turns, LLM generation, tag parsing, and avatar state."""
 
-    def __init__(self, llm: LLMClient, ws_server: WebSocketServer, bus: EventBus) -> None:
+    def __init__(
+        self,
+        llm: LLMClient,
+        ws_server: WebSocketServer,
+        bus: EventBus,
+        tts: BaseTTSEngine | None = None,
+    ) -> None:
         self.llm = llm
         self.ws = ws_server
         self.bus = bus
+        self.tts = tts
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -189,12 +197,30 @@ class Conductor:
 
         logger.info("[Say %s] %s (emo=%s, gst=%s)", utt_id, chunk.text, primary_emo, primary_gst)
 
-        # In text mode (Phase 2), notify renderer with say command
-        await self.ws.broadcast({
+        audio_url = None
+        if self.tts:
+            try:
+                audio_bytes = await self.tts.synthesize(
+                    chunk.text,
+                    emotion=primary_emo,
+                    intensity=intensity,
+                )
+                if audio_bytes:
+                    save_audio_file(utt_id, audio_bytes)
+                    audio_url = f"/audio/{utt_id}.mp3"
+            except (OSError, RuntimeError, ConnectionError, TimeoutError) as exc:
+                logger.warning("TTS synthesis failed for utterance %s: %s", utt_id, exc)
+
+        # Notify renderer with say command and optional audio_url
+        say_payload: dict[str, Any] = {
             "type": "say",
             "id": utt_id,
             "text": chunk.text,
             "emotion": primary_emo,
             "intensity": intensity,
             "gesture": primary_gst,
-        })
+        }
+        if audio_url:
+            say_payload["audio_url"] = audio_url
+
+        await self.ws.broadcast(say_payload)
