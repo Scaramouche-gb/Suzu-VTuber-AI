@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Suzu VTuber Renderer</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="load-status">Инициализация рендера...</div>
+    <canvas id="avatar-canvas"></canvas>
+
+    <!-- Debug & Control Overlay -->
+    <div id="debug-panel">
+      <div class="panel-header" id="panel-toggle">
+        <span class="panel-title">Suzu VTuber Debug</span>
+        <button class="toggle-btn" id="toggle-btn">−</button>
+      </div>
+      <div class="panel-content">
+        <div style="margin-bottom: 6px;">
+          Статус WS: <span class="status-badge" id="ws-status">Отключен</span>
+        </div>
+
+        <div class="section-title">Эмоции</div>
+        <div class="btn-group">
+          <button class="action-btn" onclick="VTUBER.emotions.setEmotion('neutral', 1)">Neutral</button>
+          <button class="action-btn" onclick="VTUBER.emotions.setEmotion('happy', 1)">Happy</button>
+          <button class="action-btn" onclick="VTUBER.emotions.setEmotion('sad', 1)">Sad</button>
+          <button class="action-btn" onclick="VTUBER.emotions.setEmotion('angry', 1)">Angry</button>
+          <button class="action-btn" onclick="VTUBER.emotions.setEmotion('relaxed', 1)">Relaxed</button>
+          <button class="action-btn" onclick="VTUBER.emotions.setEmotion('surprised', 1)">Surprised</button>
+        </div>
+
+        <div class="section-title">Жесты</div>
+        <div class="btn-group">
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('nod')">Nod</button>
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('shake')">Shake</button>
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('think')">Think</button>
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('shrug')">Shrug</button>
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('wave')">Wave</button>
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('laugh')">Laugh</button>
+          <button class="action-btn" onclick="VTUBER.gestures.playGesture('facepalm')">Facepalm</button>
+        </div>
+
+        <div class="section-title">Взгляд</div>
+        <div class="btn-group">
+          <button class="action-btn" onclick="VTUBER.avatar.setLookTarget('user')">Камера</button>
+          <button class="action-btn" onclick="VTUBER.avatar.setLookTarget('screen')">Экран</button>
+          <button class="action-btn" onclick="VTUBER.avatar.setLookTarget('point', 0.8, 0.1)">Вверх</button>
+        </div>
+
+        <div class="section-title">Тест звука & Липсинк</div>
+        <div class="btn-group">
+          <button class="action-btn" id="btn-test-sound">Синтез тон (1с)</button>
+          <button class="action-btn" onclick="VTUBER.lipsync.stop()">Стоп</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+    <script>
+      // Debug panel UI logic
+      const panel = document.getElementById('debug-panel');
+      const toggleBtn = document.getElementById('toggle-btn');
+      const wsStatus = document.getElementById('ws-status');
+
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.classList.toggle('minimized');
+        toggleBtn.textContent = panel.classList.contains('minimized') ? '+' : '−';
+      });
+
+      window.addEventListener('DOMContentLoaded', () => {
+        if (window.VTUBER && window.VTUBER.ws) {
+          window.VTUBER.ws.on('connected', () => {
+            wsStatus.textContent = 'Подключен';
+            wsStatus.classList.add('connected');
+          });
+          window.VTUBER.ws.on('disconnected', () => {
+            wsStatus.textContent = 'Отключен';
+            wsStatus.classList.remove('connected');
+          });
+        }
+
+        // Test audio tone generation for lipsync validation
+        document.getElementById('btn-test-sound').addEventListener('click', () => {
+          const lipsync = window.VTUBER.lipsync;
+          lipsync.ensureContext();
+          const ctx = lipsync.audioContext;
+          if (!ctx) return;
+
+          // Generate synthetic tone buffer
+          const sampleRate = ctx.sampleRate;
+          const duration = 1.2;
+          const buffer = ctx.createBuffer(1, sampleRate * duration, sampleRate);
+          const data = buffer.getChannelData(0);
+
+          for (let i = 0; i < buffer.length; i++) {
+            // Modulation to simulate speech syllables
+            const t = i / sampleRate;
+            const modulation = (Math.sin(2 * Math.PI * 4 * t) + 1.2) * 0.4;
+            data[i] = Math.sin(2 * Math.PI * 300 * t) * modulation * 0.5;
+          }
+
+          const source = ctx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(lipsync.analyser);
+          lipsync.analyser.connect(ctx.destination);
+          lipsync.currentSource = source;
+          lipsync.isPlaying = true;
+
+          source.onended = () => {
+            lipsync.isPlaying = false;
+            lipsync.currentSource = null;
+          };
+          source.start(0);
+        });
+      });
+    </script>
+  </body>
+</html>
