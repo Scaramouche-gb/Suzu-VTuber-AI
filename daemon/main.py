@@ -18,6 +18,7 @@ from daemon.conductor import Conductor
 from daemon.config import Config, load_config
 from daemon.initiative import InitiativeManager
 from daemon.llm import LLMClient
+from daemon.memory import MemoryManager
 from daemon.stt import MockSTT, WhisperSTT
 from daemon.tts import create_tts_engine
 from daemon.vision import VisionManager
@@ -130,9 +131,14 @@ async def run_server(
     audio_in = AudioInManager(cfg.audio_in, bus)
     vision = VisionManager(cfg.vision, bus)
 
-    # Initialize LLM client, TTS engine and Conductor
+    # Initialize LLM client, TTS engine, memory, initiative and Conductor
     llm = LLMClient(cfg.llm, dry_run=dry_run)
     tts = create_tts_engine(cfg.tts, dry_run=dry_run)
+    memory = MemoryManager(
+        db_path=cfg.memory.db_path,
+        context_turns=cfg.memory.context_turns,
+        summarize_every=cfg.memory.summarize_every,
+    )
     initiative = InitiativeManager(cfg.initiative)
     conductor = Conductor(
         llm=llm,
@@ -142,11 +148,13 @@ async def run_server(
         stt=stt,
         vision=vision,
         initiative=initiative,
+        memory=memory,
     )
     app["conductor"] = conductor
     app["audio_in"] = audio_in
     app["vision"] = vision
     app["initiative"] = initiative
+    app["memory"] = memory
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

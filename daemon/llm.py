@@ -64,16 +64,20 @@ class LLMClient:
         history: list[dict[str, str]] | None = None,
         context_info: str | None = None,
         facts: list[str] | None = None,
+        episodes: list[str] | None = None,
         image_base64: str | None = None,
     ) -> list[dict[str, Any]]:
         """Assemble system prompt, history, context, and user replica."""
         messages: list[dict[str, Any]] = []
 
-        # System message: persona + rules + facts
+        # System message: persona + rules + facts + episodes
         system_parts = [self.persona_text, self.rules_text]
         if facts:
             facts_block = "\n## ФАКТЫ О ПОЛЬЗОВАТЕЛЕ:\n" + "\n".join(f"- {f}" for f in facts[:20])
             system_parts.append(facts_block)
+        if episodes:
+            episodes_block = "\n## ЗАМЕТКИ ПРОШЛЫХ РАЗГОВОРОВ:\n" + "\n".join(f"- {e}" for e in episodes[:5])
+            system_parts.append(episodes_block)
 
         messages.append({"role": "system", "content": "\n\n".join(p for p in system_parts if p)})
 

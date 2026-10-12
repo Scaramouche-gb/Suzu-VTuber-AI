@@ -21,6 +21,7 @@ from daemon.bus import (
 )
 from daemon.initiative import InitiativeDecision, InitiativeManager
 from daemon.llm import LLMClient
+from daemon.memory import MemoryManager
 from daemon.sentence import SentenceChunk, SentenceSplitter
 from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
 from daemon.tts import BaseTTSEngine, save_audio_file
@@ -41,6 +42,7 @@ class Conductor:
         stt: Any | None = None,
         vision: Any | None = None,
         initiative: InitiativeManager | None = None,
+        memory: MemoryManager | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
@@ -49,6 +51,7 @@ class Conductor:
         self.stt = stt
         self.vision = vision
         self.initiative = initiative or InitiativeManager()
+        self.memory = memory
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -69,11 +72,13 @@ class Conductor:
         self._initiative_task = asyncio.create_task(self._initiative_loop())
 
     async def close(self) -> None:
-        """Clean up background tasks."""
+        """Clean up background tasks and persistent memory."""
         if self._initiative_task and not self._initiative_task.done():
             self._initiative_task.cancel()
         if self._current_gen_task and not self._current_gen_task.done():
             self._current_gen_task.cancel()
+        if self.memory:
+            await self.memory.close()
 
     def set_state(self, new_state: str) -> None:
         """Update and broadcast state."""
@@ -138,6 +143,15 @@ class Conductor:
         elif cmd == "look":
             target = args.get("target", "cursor")
             await self.ws.broadcast({"type": "look", "target": target})
+
+        elif cmd == "memory":
+            action = args.get("action", "list")
+            if self.memory:
+                if action == "wipe":
+                    await self.memory.wipe_memory()
+                elif action == "forget":
+                    fact_id = int(args.get("id", 0))
+                    await self.memory.delete_fact(fact_id)
 
     async def handle_user_speech_start(self, event: UserSpeechStart) -> None:
         """User started speaking; immediately interrupt active speech and transition to listening."""
@@ -266,10 +280,20 @@ class Conductor:
             ]
             target_model = self.llm.cfg.fast_model
         else:
+            facts_list = None
+            episodes_list = None
+            if self.memory:
+                fact_records = await self.memory.get_facts(limit=20)
+                facts_list = [f.text for f in fact_records]
+                episode_records = await self.memory.get_recent_episodes(limit=5)
+                episodes_list = [e.summary for e in episode_records]
+
             messages = self.llm.build_messages(
                 user_message=user_text,
                 history=self.history[-12:],
                 context_info=context_info,
+                facts=facts_list,
+                episodes=episodes_list,
                 image_base64=image_base64,
             )
             target_model = self.llm.cfg.chat_model
@@ -320,10 +344,16 @@ class Conductor:
                 if is_proactive:
                     self.history.append({"role": "assistant", "content": reply_str})
                     self.initiative.on_avatar_spoken(is_proactive=True, text=reply_str)
+                    if self.memory:
+                        await self.memory.record_message(role="assistant", text=reply_str, kind="proactive")
                 else:
                     self.history.append({"role": "user", "content": user_text})
                     self.history.append({"role": "assistant", "content": reply_str})
                     self.initiative.on_avatar_spoken(is_proactive=False, text=reply_str)
+                    if self.memory:
+                        await self.memory.record_message(role="user", text=user_text, kind="user")
+                        await self.memory.record_message(role="assistant", text=reply_str, kind="chat")
+                        asyncio.create_task(self.memory.maybe_summarize(self.llm))
 
                 if self.stt:
                     self.stt.set_last_avatar_phrase(reply_str)
