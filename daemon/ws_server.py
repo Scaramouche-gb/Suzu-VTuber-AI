@@ -117,9 +117,97 @@ class WebSocketServer:
         return asyncio.create_task(self.broadcast({"type": "state", "value": new_state}))
 
 
+async def handle_api_status(request: web.Request) -> web.Response:
+    """REST API endpoint returning daemon status."""
+    conductor = request.app.get("conductor")
+    initiative = request.app.get("initiative")
+    vision = request.app.get("vision")
+
+    status_data = {
+        "state": conductor.state if conductor else "idle",
+        "mood": initiative.mood.value if initiative else "unknown",
+        "energy": initiative.energy if initiative else 1.0,
+        "dnd": initiative.dnd if initiative else False,
+        "muted": initiative.muted if initiative else False,
+        "blind": vision.blind_mode if vision else False,
+        "active_app": vision.active_app if vision else "",
+        "active_title": vision.active_title if vision else "",
+        "screen_context": vision.screen_context if vision else "",
+        "daily_cost": conductor.llm.budget.daily_spent if (conductor and conductor.llm) else 0.0,
+        "max_usd_per_day": conductor.llm.cfg.max_usd_per_day if (conductor and conductor.llm) else 0.0,
+    }
+    return web.json_response(status_data)
+
+
+async def handle_api_command(request: web.Request) -> web.Response:
+    """REST API endpoint receiving control commands."""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    cmd = body.get("command", "")
+    args = body.get("args", {})
+    bus: EventBus = request.app["bus"]
+    ws_server: WebSocketServer = request.app["ws_server"]
+
+    if cmd in ("hide", "show"):
+        await ws_server.broadcast({"type": cmd})
+
+    await bus.publish(UserCommand(command=cmd, args=args))
+    return web.json_response({"status": "ok", "command": cmd})
+
+
+async def handle_api_memory(request: web.Request) -> web.Response:
+    """REST API endpoint returning memory facts and episodes."""
+    memory = request.app.get("memory")
+    if not memory:
+        return web.json_response({"facts": [], "episodes": []})
+
+    facts = await memory.list_facts()
+    episodes = await memory.get_recent_episodes(limit=5)
+    return web.json_response({
+        "facts": facts,
+        "episodes": [{"id": e.id, "summary": e.summary} for e in episodes],
+    })
+
+
+async def handle_api_memory_forget(request: web.Request) -> web.Response:
+    """REST API endpoint to delete a fact by ID."""
+    memory = request.app.get("memory")
+    if not memory:
+        return web.json_response({"status": "error", "message": "Memory not configured"}, status=400)
+
+    try:
+        body = await request.json()
+        fact_id = int(body.get("id", 0))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return web.json_response({"status": "error", "message": "Invalid ID"}, status=400)
+
+    deleted = await memory.delete_fact(fact_id)
+    return web.json_response({"status": "ok", "deleted": deleted})
+
+
+async def handle_api_memory_wipe(request: web.Request) -> web.Response:
+    """REST API endpoint to wipe all persistent memory."""
+    memory = request.app.get("memory")
+    if not memory:
+        return web.json_response({"status": "error", "message": "Memory not configured"}, status=400)
+
+    await memory.wipe_memory()
+    return web.json_response({"status": "ok", "wiped": True})
+
+
 def setup_routes(app: web.Application, ws_server: WebSocketServer) -> None:
-    """Setup HTTP and WebSocket routes on aiohttp web application."""
+    """Setup HTTP, REST API, and WebSocket routes on aiohttp web application."""
     app.router.add_get("/ws", ws_server.handle_ws)
+
+    # REST Control API
+    app.router.add_get("/api/status", handle_api_status)
+    app.router.add_post("/api/command", handle_api_command)
+    app.router.add_get("/api/memory", handle_api_memory)
+    app.router.add_post("/api/memory/forget", handle_api_memory_forget)
+    app.router.add_post("/api/memory/wipe", handle_api_memory_wipe)
 
     # Audio cache directory serving
     DEFAULT_AUDIO_CACHE.mkdir(parents=True, exist_ok=True)

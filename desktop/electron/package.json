@@ -1,0 +1,12 @@
+{
+  "name": "vtuber-desktop-overlay",
+  "version": "0.1.0",
+  "description": "Transparent Wayland desktop overlay for Suzu VTuber",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^35.0.0"
+  }
+}

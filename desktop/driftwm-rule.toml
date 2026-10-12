@@ -1,0 +1,8 @@
+# Rule snippet for ~/.config/driftwm/config.toml
+# Pins the VTuber overlay window directly to the screen above normal windows
+
+[[window_rules]]
+app_id = "vtuber"
+pinned_to_screen = true
+decoration = "none"
+position = [1480, 360]

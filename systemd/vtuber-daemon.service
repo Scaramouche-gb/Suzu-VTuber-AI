@@ -1,0 +1,15 @@
+[Unit]
+Description=Suzu AI-VTuber Companion Daemon
+After=pipewire.service graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/git/public/Suzu-VTuber-AI
+ExecStart=/usr/bin/env uv run python -m daemon.main
+Restart=on-failure
+RestartSec=5s
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target
