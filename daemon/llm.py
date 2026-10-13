@@ -207,6 +207,10 @@ class LLMClient:
         if "claude" not in model.lower() and self.cfg.temperature != 1.0:
             kwargs["temperature"] = self.cfg.temperature
 
+        # Bypass slow multi-second reasoning thinking phases on compatible models for instant TTFT (~1s)
+        if any(m in model.lower() for m in ("gpt-5", "gpt-6", "sol", "luna", "terra")):
+            kwargs["extra_body"] = {"reasoning_effort": "none"}
+
         api_base = getattr(self.cfg, "api_base", "") or os.environ.get("OPENAI_API_BASE", "")
         if api_base:
             kwargs["api_base"] = api_base

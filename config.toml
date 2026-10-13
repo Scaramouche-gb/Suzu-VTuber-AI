@@ -9,9 +9,9 @@ host = "127.0.0.1"
 port = 8765
 
 [llm]
-chat_model = "openai/gpt-5.6-sol"
-fast_model = "openai/gpt-5.6-sol"
-fallback_model = "openai/gpt-5.5"
+chat_model = "openai/gpt-5.6-luna"
+fast_model = "openai/gpt-5.6-luna"
+fallback_model = "openai/gpt-6-sol"
 api_base = "https://codex.sale/v1"
 temperature = 0.85
 max_tokens = 280
@@ -19,7 +19,7 @@ max_usd_per_day = 10.0
 
 [stt]
 engine = "faster-whisper"
-model = "small"
+model = "base"
 device = "cpu"
 compute_type = "int8"
 language = "ru"
@@ -29,9 +29,9 @@ initial_prompt = "Разговор с подругой по имени Сузу.
 device = ""
 sample_rate = 16000
 vad_threshold = 0.65
-min_speech_ms = 500
-end_silence_ms = 800
-preroll_ms = 350
+min_speech_ms = 450
+end_silence_ms = 450
+preroll_ms = 300
 
 [tts]
 engine = "silero"
