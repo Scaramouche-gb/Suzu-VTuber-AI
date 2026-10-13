@@ -131,21 +131,21 @@ class WhisperSTT:
                 continue
 
             # 1. Metric filtering (relaxed to preserve muffled, quiet or rapid user speech)
-            if segment.no_speech_prob > 0.55:
+            if segment.no_speech_prob > 0.85:
                 logger.debug(
-                    "STT: Discarded segment due to no_speech_prob (%.2f): '%s'",
+                    "STT: Discarded segment due to high no_speech_prob (%.2f): '%s'",
                     segment.no_speech_prob,
                     text,
                 )
                 continue
-            if segment.avg_logprob < -1.20:
+            if segment.avg_logprob < -1.65:
                 logger.debug(
                     "STT: Discarded segment due to low avg_logprob (%.2f): '%s'",
                     segment.avg_logprob,
                     text,
                 )
                 continue
-            if segment.compression_ratio > 2.4:
+            if segment.compression_ratio > 2.6:
                 logger.debug(
                     "STT: Discarded repetitive hallucination (compression=%.2f): '%s'",
                     segment.compression_ratio,
@@ -159,18 +159,17 @@ class WhisperSTT:
                 logger.debug("STT: Discarded blacklisted hallucination: '%s'", text)
                 continue
 
-            # 3. Minimum length & solitary noise token rejection
+            # 3. Minimum length & solitary non-lexical filler rejection
             stripped = clean_lower.strip(".,!?-—~ ")
             if len(stripped) < 2:
                 continue
 
             tokens = [t.strip(".,!?-—~ ") for t in clean_lower.split() if t.strip(".,!?-—~ ")]
-            if len(tokens) == 1 and tokens[0] in (
-                "да", "а", "о", "э", "угу", "ну", "так", "ага", "и", "что", "хм", "мм", "ок", "ой", "ай", "эх"
-            ):
-                logger.debug("STT: Discarded solitary noise token: '%s'", text)
+            if len(tokens) == 1 and tokens[0] in ("ээ", "мм", "хм", "эх", "ой", "ай"):
+                logger.debug("STT: Discarded solitary filler token: '%s'", text)
                 continue
 
+            logger.info("STT: Recognized segment: '%s' (logprob=%.2f, no_speech=%.2f)", text, segment.avg_logprob, segment.no_speech_prob)
             valid_texts.append(text)
 
         result_text = " ".join(valid_texts).strip()
