@@ -44,6 +44,8 @@ export const EMOTION_MAP = {
   // Relaxed / Neutral
   relaxed: ['happy01', 'relaxed', 'fun'],
   sleepy: ['happy01', 'relaxed'],
+  whisper: ['happy01', 'relaxed', 'doubt'],
+  secret: ['happy04', 'happy01'],
   neutral: [],
 };
 

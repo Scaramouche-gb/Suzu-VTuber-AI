@@ -51,6 +51,25 @@ class PronunciationDictionary:
         return text
 
 
+def get_rvc_semitones(base_f0: int, emotion: str, intensity: float = 1.0) -> int:
+    """Compute expressive RVC vocal semitone transposition from emotion tag."""
+    emo = (emotion or "neutral").lower()
+    scale = min(1.0, max(0.0, intensity))
+    if emo in ("excited", "surprised"):
+        return base_f0 + round(4 * scale)
+    if emo in ("happy", "joy", "laugh"):
+        return base_f0 + round(3 * scale)
+    if emo in ("playful", "silly", "smug"):
+        return base_f0 + round(2 * scale)
+    if emo == "whisper":
+        return base_f0 - round(3 * scale)
+    if emo in ("sad", "worried", "sorrow"):
+        return base_f0 - round(2 * scale)
+    if emo in ("angry", "annoyed", "pout"):
+        return base_f0 - round(1 * scale)
+    return base_f0
+
+
 class BaseTTSEngine(abc.ABC):
     """Abstract base class for TTS synthesis engines."""
 
@@ -126,7 +145,8 @@ class EdgeTTSEngine(BaseTTSEngine):
                     if shift != 1.0:
                         audio_data = self._apply_pitch_shift(audio_data, shift)
                     if self.cfg.rvc.enabled:
-                        audio_data = await self.rvc.convert(audio_data)
+                        rvc_semitones = get_rvc_semitones(self.cfg.rvc.f0_up_key, emotion, intensity)
+                        audio_data = await self.rvc.convert(audio_data, f0_up_key=rvc_semitones)
                     return audio_data
             except (
                 aiohttp.ClientError,
@@ -206,7 +226,8 @@ class SileroTTSEngine(BaseTTSEngine):
             None, self._sync_synthesize, clean_text, emotion, intensity
         )
         if self.cfg.rvc.enabled and raw_audio:
-            return await self.rvc.convert(raw_audio)
+            rvc_semitones = get_rvc_semitones(self.cfg.rvc.f0_up_key, emotion, intensity)
+            return await self.rvc.convert(raw_audio, f0_up_key=rvc_semitones)
         return raw_audio
 
     def _sync_synthesize(
@@ -224,45 +245,64 @@ class SileroTTSEngine(BaseTTSEngine):
             shift = base_shift
             tempo_factor = 1.0
             volume = 1.25
-            eq = ",equalizer=f=300:width_type=h:width=150:g=2.2,lowpass=f=9200"
+            eq_filter = (
+                "equalizer=f=280:width_type=h:width=120:g=1.8,"
+                "equalizer=f=3400:width_type=q:width=1.8:g=-2.0,"
+                "treble=g=1.5:f=7500"
+            )
 
-            if emo in ("happy", "joy"):
-                shift = base_shift + 0.025 * scale
-                tempo_factor = 1.0 + 0.04 * scale
+            if emo == "whisper":
+                # Intimate close-mic whisper: low volume, airy breath EQ, soft highpass
+                shift = base_shift - 0.08 * scale
+                tempo_factor = 1.0 - 0.08 * scale
+                volume = 0.75
+                eq_filter = (
+                    "highpass=f=260,"
+                    "equalizer=f=350:width_type=h:width=120:g=-4.5,"
+                    "equalizer=f=6200:width_type=q:width=1.5:g=4.2,"
+                    "treble=g=3.0:f=8000"
+                )
+            elif emo in ("excited", "surprised"):
+                # Elevated vocal pitch, high energy, crisp presence
+                shift = base_shift + 0.12 * scale
+                tempo_factor = 1.0 + 0.08 * scale
+                volume = 1.35
+                eq_filter = (
+                    "highpass=f=80,"
+                    "equalizer=f=280:width_type=h:width=120:g=1.2,"
+                    "equalizer=f=3200:width_type=q:width=1.8:g=2.5,"
+                    "treble=g=2.2:f=7500"
+                )
+            elif emo in ("happy", "joy", "laugh"):
+                shift = base_shift + 0.08 * scale
+                tempo_factor = 1.0 + 0.05 * scale
+                volume = 1.28
+                eq_filter = "highpass=f=75,equalizer=f=280:width_type=h:width=120:g=1.5,treble=g=1.8:f=7500"
             elif emo in ("playful", "silly", "smug"):
-                shift = base_shift + 0.03 * scale
+                shift = base_shift + 0.05 * scale
                 tempo_factor = 1.0 + 0.04 * scale
-            elif emo in ("surprised", "excited"):
-                shift = base_shift + 0.045 * scale
-                tempo_factor = 1.0 + 0.06 * scale
+                volume = 1.25
+                eq_filter = "highpass=f=75,equalizer=f=280:width_type=h:width=120:g=1.2,treble=g=1.5:f=7500"
             elif emo in ("angry", "annoyed", "pout"):
-                shift = base_shift - 0.02 * scale
+                shift = base_shift - 0.05 * scale
                 tempo_factor = 1.0 + 0.06 * scale
-                volume = 1.30
+                volume = 1.35
+                eq_filter = "highpass=f=60,equalizer=f=250:width_type=h:width=100:g=2.8,treble=g=-1.0:f=6000"
             elif emo in ("sad", "worried", "sorrow"):
-                shift = base_shift - 0.03 * scale
-                tempo_factor = 1.0 - 0.06 * scale
-                volume = 1.10
-            elif emo in ("sleepy", "tired"):
-                shift = base_shift - 0.025 * scale
+                shift = base_shift - 0.08 * scale
                 tempo_factor = 1.0 - 0.10 * scale
                 volume = 1.05
-            elif emo in ("relaxed", "calm"):
-                shift = base_shift - 0.01 * scale
-                tempo_factor = 1.0 - 0.02 * scale
-                volume = 1.15
-            elif emo in ("curious", "thinking", "doubt"):
-                shift = base_shift + 0.015 * scale
-                tempo_factor = 1.01
-                volume = 1.20
+                eq_filter = "highpass=f=90,equalizer=f=300:width_type=h:width=150:g=-2.0,treble=g=-1.5:f=6000"
+            elif emo in ("sleepy", "tired"):
+                shift = base_shift - 0.06 * scale
+                tempo_factor = 1.0 - 0.12 * scale
+                volume = 1.0
+                eq_filter = "highpass=f=90,equalizer=f=300:width_type=h:width=150:g=-1.5,treble=g=-1.0:f=6000"
 
             final_tempo = max(0.6, min(1.8, tempo_factor))
             vocal_filter = (
-                f"highpass=f=75,"
                 f"rubberband=pitch={shift:.3f}:tempo={final_tempo:.3f}:formant=preserved,"
-                f"equalizer=f=280:width_type=h:width=120:g=1.8,"
-                f"equalizer=f=3400:width_type=q:width=1.8:g=-2.0,"
-                f"treble=g=1.5:f=7500,"
+                f"{eq_filter},"
                 f"compand=attacks=0.02:decays=0.1:points=-80/-80|-32/-18|-12/-6|0/-2:gain={volume:.2f}"
             )
 
@@ -301,7 +341,7 @@ class SileroTTSEngine(BaseTTSEngine):
                 "-i",
                 "pipe:0",
                 "-af",
-                f"asetrate=24000*{shift:.3f},aresample=24000,atempo={fallback_tempo:.3f},volume={volume:.2f}{eq}",
+                f"asetrate=24000*{shift:.3f},aresample=24000,atempo={fallback_tempo:.3f},{eq_filter},volume={volume:.2f}",
                 "-f",
                 "mp3",
                 "pipe:1",
