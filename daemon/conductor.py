@@ -30,7 +30,15 @@ from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.rag import RAGManager
 from daemon.sentence import SentenceChunk, SentenceSplitter
-from daemon.tagparser import CommandTag, EmotionTag, GestureTag, LookTag, SilentTag, TagParser
+from daemon.tagparser import (
+    CommandTag,
+    EmotionTag,
+    GestureTag,
+    LookTag,
+    SilentTag,
+    TagParser,
+    ThoughtTag,
+)
 from daemon.tencent_bridge import TencentMemoryBridge
 from daemon.tts import BaseTTSEngine, get_audio_path, save_audio_file
 from daemon.ws_server import WebSocketServer
@@ -53,6 +61,7 @@ class Conductor:
         memory: MemoryManager | None = None,
         rag: RAGManager | None = None,
         coder: AntigravityBridge | None = None,
+        tencent: TencentMemoryBridge | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
@@ -62,8 +71,11 @@ class Conductor:
         self.vision = vision
         self.initiative = initiative or InitiativeManager()
         self.memory = memory
-        self.tencent = TencentMemoryBridge()
-        asyncio.create_task(self.tencent.initialize())
+        self.tencent = tencent or TencentMemoryBridge()
+        try:
+            asyncio.create_task(self.tencent.initialize())
+        except RuntimeError:
+            pass
         self.rag = rag or RAGManager(memory=self.memory, tencent=self.tencent)
         self.coder = coder or AntigravityBridge()
         self._pending_coder_notice: str | None = None
@@ -517,7 +529,7 @@ class Conductor:
 
         # Context block from vision
         if context_info is None and self.vision:
-            context_info = f"активное окно: {self.vision.active_app} ({self.vision.active_title}); {self.vision.screen_context}"
+            context_info = self.vision.screen_context
 
         # Vision Layer 2: Attach screen frame if user asks about screen
         if image_base64 is None and self.vision and not self.vision.blind_mode:
@@ -818,6 +830,10 @@ class Conductor:
     async def _handle_tag(self, tag: Any, splitter: SentenceSplitter) -> None:
         if isinstance(tag, SilentTag):
             logger.info("[Tag] Avatar chose to remain silent (<silent>)")
+            return
+
+        if isinstance(tag, ThoughtTag):
+            logger.info("[Thought] %s", tag.content)
             return
 
         if isinstance(tag, EmotionTag):

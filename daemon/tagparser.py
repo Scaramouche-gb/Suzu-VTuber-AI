@@ -37,7 +37,12 @@ class SilentTag:
     pass
 
 
-TagItem = EmotionTag | GestureTag | LookTag | SilentTag | CommandTag
+@dataclass(slots=True)
+class ThoughtTag:
+    content: str
+
+
+TagItem = EmotionTag | GestureTag | LookTag | SilentTag | CommandTag | ThoughtTag
 
 
 @dataclass(slots=True)
@@ -51,12 +56,14 @@ class ParsedToken:
 
 
 class TagParser:
-    """Stateful streaming tag parser with cross-chunk boundary support."""
+    """Stateful streaming tag parser with cross-chunk boundary support and thought isolation."""
 
     def __init__(self, max_tag_length: int = 500) -> None:
         self.max_tag_length = max_tag_length
         self._in_tag = False
         self._tag_buffer: list[str] = []
+        self._in_thought = False
+        self._thought_buffer: list[str] = []
 
     def feed(self, chunk: str) -> list[str | TagItem]:
         """Process incoming chunk and return speech text segments and parsed tags."""
@@ -69,38 +76,69 @@ class TagParser:
                     self._in_tag = True
                     self._tag_buffer = []
                 else:
-                    speech_buf.append(ch)
+                    if self._in_thought:
+                        self._thought_buffer.append(ch)
+                    else:
+                        speech_buf.append(ch)
             else:
                 if ch == ">":
                     tag_str = "".join(self._tag_buffer).strip()
-                    parsed_tag = self._parse_tag_string(tag_str)
-                    if parsed_tag:
+                    tag_lower = tag_str.lower()
+
+                    if tag_lower == "thought":
                         if speech_buf:
                             output.append("".join(speech_buf))
                             speech_buf = []
-                        output.append(parsed_tag)
+                        self._in_thought = True
+                        self._thought_buffer = []
+                    elif tag_lower in ("/thought", "thought/"):
+                        thought_content = "".join(self._thought_buffer).strip()
+                        self._in_thought = False
+                        self._thought_buffer = []
+                        if thought_content:
+                            output.append(ThoughtTag(content=thought_content))
                     else:
-                        # Invalid tag, treat as plain text: "<" + buffer + ">"
-                        speech_buf.append("<")
-                        speech_buf.extend(self._tag_buffer)
-                        speech_buf.append(">")
+                        parsed_tag = self._parse_tag_string(tag_str)
+                        if parsed_tag:
+                            if speech_buf:
+                                output.append("".join(speech_buf))
+                                speech_buf = []
+                            output.append(parsed_tag)
+                        else:
+                            # Invalid tag, treat as plain text
+                            if self._in_thought:
+                                self._thought_buffer.append("<")
+                                self._thought_buffer.extend(self._tag_buffer)
+                                self._thought_buffer.append(">")
+                            else:
+                                speech_buf.append("<")
+                                speech_buf.extend(self._tag_buffer)
+                                speech_buf.append(">")
                     self._in_tag = False
                     self._tag_buffer = []
                 elif ch == "<":
-                    # Nested '<', flush previous as plain text and restart
-                    speech_buf.append("<")
-                    speech_buf.extend(self._tag_buffer)
+                    # Nested '<', flush previous
+                    if self._in_thought:
+                        self._thought_buffer.append("<")
+                        self._thought_buffer.extend(self._tag_buffer)
+                    else:
+                        speech_buf.append("<")
+                        speech_buf.extend(self._tag_buffer)
                     self._tag_buffer = []
                 else:
                     self._tag_buffer.append(ch)
                     if len(self._tag_buffer) > self.max_tag_length:
-                        # Exceeded max length, flush as plain text
-                        speech_buf.append("<")
-                        speech_buf.extend(self._tag_buffer)
+                        # Exceeded max length, flush
+                        if self._in_thought:
+                            self._thought_buffer.append("<")
+                            self._thought_buffer.extend(self._tag_buffer)
+                        else:
+                            speech_buf.append("<")
+                            speech_buf.extend(self._tag_buffer)
                         self._in_tag = False
                         self._tag_buffer = []
 
-        if speech_buf:
+        if speech_buf and not self._in_thought:
             output.append("".join(speech_buf))
 
         return output
@@ -108,14 +146,26 @@ class TagParser:
     def flush(self) -> list[str | TagItem]:
         """Flush remaining buffered text at end of stream."""
         output: list[str | TagItem] = []
+        if self._in_thought and self._thought_buffer:
+            thought_text = "".join(self._thought_buffer).strip()
+            self._in_thought = False
+            self._thought_buffer = []
+            if thought_text:
+                output.append(ThoughtTag(content=thought_text))
+
         if self._in_tag:
             tag_str = "".join(self._tag_buffer).strip()
-            # If stream ended with unclosed tag (e.g. <cmd=type:text without '>'), attempt parse
-            parsed_tag = self._parse_tag_string(tag_str)
-            if parsed_tag:
-                output.append(parsed_tag)
+            tag_lower = tag_str.lower()
+            if tag_lower in ("/thought", "thought/"):
+                if self._thought_buffer:
+                    output.append(ThoughtTag(content="".join(self._thought_buffer).strip()))
+                    self._thought_buffer = []
             else:
-                output.append("<" + "".join(self._tag_buffer))
+                parsed_tag = self._parse_tag_string(tag_str)
+                if parsed_tag:
+                    output.append(parsed_tag)
+                else:
+                    output.append("<" + "".join(self._tag_buffer))
             self._in_tag = False
             self._tag_buffer = []
         return output
@@ -124,6 +174,11 @@ class TagParser:
     def _parse_tag_string(s: str) -> TagItem | None:
         if s == "silent":
             return SilentTag()
+
+        s_lower = s.lower()
+        if s_lower.startswith(("thought=", "thought:")):
+            val = s.split("=", 1)[1] if "=" in s else s.split(":", 1)[1]
+            return ThoughtTag(content=val.strip())
 
         emo_match = EMOTION_REGEX.match(s)
         if emo_match:

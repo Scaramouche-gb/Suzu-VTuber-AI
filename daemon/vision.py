@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import io
+import json
 import logging
-import re
 import shutil
 import time
 from collections import deque
@@ -20,9 +20,6 @@ from daemon.bus import EventBus, ScreenChange
 from daemon.config import VisionConfig
 
 logger = logging.getLogger(__name__)
-
-DRIFT_ACTIVE_WINDOW_RE = re.compile(r"^\s*\*\s*#\d+\s+([^\s]+)\s+\[[^\]]+\]\s+\S+\s+\"(.*)\"$")
-DRIFT_ACTIVE_OUTPUT_RE = re.compile(r"^\s*\*\s*([^\s]+)\s+camera\s+")
 
 
 @dataclass(slots=True)
@@ -56,6 +53,8 @@ class VisionManager:
         self.screen_context: str = "экран в покое"
         self.active_app: str = ""
         self.active_title: str = ""
+        self.other_apps: list[str] = []
+        self.media_context: str = ""
 
         # Tracking metrics
         self._last_small_img: np.ndarray | None = None
@@ -67,41 +66,102 @@ class VisionManager:
         self._consecutive_heavy_diffs = 0
         self._is_video_mode = False
 
-    async def get_driftwm_state(self) -> tuple[str, str, str]:
-        """Query driftwm msg state and parse active app, active title, active monitor."""
+    @staticmethod
+    def parse_driftwm_state_dict(data: dict) -> tuple[str, str, str, list[str]]:
+        """Parse driftwm JSON state dict into (active_app, active_title, active_output, other_apps)."""
+        state = data.get("Ok", {}).get("State", {}) if "Ok" in data else data.get("State", data)
+        windows = state.get("windows", [])
+        outputs = state.get("outputs", [])
+
+        active_app = ""
+        active_title = ""
+        active_output = ""
+        other_apps: list[str] = []
+
+        for out in outputs:
+            if out.get("active"):
+                active_output = out.get("name", "")
+                break
+
+        for w in windows:
+            if w.get("is_widget"):
+                continue
+            app_name = w.get("app_id", "")
+            title_name = w.get("title", "")
+            if w.get("is_focused"):
+                active_app = app_name
+                active_title = title_name
+            else:
+                if app_name:
+                    desc = f"{app_name} («{title_name[:35]}»)" if title_name else app_name
+                    if desc not in other_apps:
+                        other_apps.append(desc)
+
+        return active_app, active_title, active_output, other_apps
+
+    async def get_driftwm_state(self) -> tuple[str, str, str, list[str]]:
+        """Query driftwm msg state via JSON and parse active app, title, monitor, and background windows."""
         if not shutil.which("driftwm"):
-            return "", "", ""
+            return "", "", "", []
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 "driftwm",
                 "msg",
                 "state",
+                "--json",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=1.5)
-            text = stdout.decode("utf-8", errors="replace")
+            if proc.returncode != 0 or not stdout:
+                return "", "", "", []
 
-            active_app = ""
-            active_title = ""
-            active_output = ""
+            data = json.loads(stdout.decode("utf-8", errors="replace"))
+            active_app, active_title, active_output, other_apps = self.parse_driftwm_state_dict(data)
 
-            for line in text.splitlines():
-                win_match = DRIFT_ACTIVE_WINDOW_RE.match(line)
-                if win_match:
-                    active_app = win_match.group(1)
-                    active_title = win_match.group(2)
-                    continue
+            # Fallback if focus is not marked on windows
+            if not active_app:
+                focus_proc = await asyncio.create_subprocess_exec(
+                    "driftwm",
+                    "msg",
+                    "focus",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                f_out, _ = await asyncio.wait_for(focus_proc.communicate(), timeout=1.0)
+                if focus_proc.returncode == 0 and f_out:
+                    focus_line = f_out.decode().strip()
+                    parts = focus_line.split(maxsplit=1)
+                    if len(parts) == 2:
+                        active_app = parts[1]
 
-                out_match = DRIFT_ACTIVE_OUTPUT_RE.match(line)
-                if out_match:
-                    active_output = out_match.group(1)
-
-            return active_app, active_title, active_output
-        except (OSError, TimeoutError, UnicodeDecodeError) as exc:
+            return active_app, active_title, active_output, other_apps
+        except (OSError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
             logger.debug("Failed to query driftwm state: %s", exc)
-            return "", "", ""
+            return "", "", "", []
+
+    @staticmethod
+    async def get_media_context() -> str:
+        """Query currently playing media metadata via playerctl."""
+        if not shutil.which("playerctl"):
+            return ""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "playerctl",
+                "metadata",
+                "--format",
+                "{{status}}: {{artist}} — {{title}}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=0.8)
+            text = stdout.decode().strip()
+            if text and not text.lower().startswith("no player"):
+                return text
+        except (OSError, TimeoutError):
+            pass
+        return ""
 
     def is_blacklisted(self, app_id: str, title: str) -> bool:
         """Check if active window violates blacklist constraints."""
@@ -191,10 +251,15 @@ class VisionManager:
             self.screen_context = "экран скрыт (слепая зона)"
             return
 
-        # Query active window and output
-        app_id, title, output_name = await self.get_driftwm_state()
+        # Query active window, output, background windows and media
+        app_id, title, output_name, other_apps = await self.get_driftwm_state()
         self.active_app = app_id
         self.active_title = title
+        self.other_apps = other_apps
+
+        # Query media status
+        media_str = await self.get_media_context()
+        self.media_context = media_str
 
         # Blacklist check
         if self.is_blacklisted(app_id, title):
@@ -241,16 +306,28 @@ class VisionManager:
             self._consecutive_heavy_diffs += 1
             if self._consecutive_heavy_diffs >= 5:
                 self._is_video_mode = True
-                self.screen_context = (
-                    f"пользователь смотрит видео или динамичный контент в {app_id}"
-                )
         else:
             self._consecutive_heavy_diffs = 0
             self._is_video_mode = False
-            if app_id:
-                self.screen_context = f"активно окно {app_id}: «{title[:40]}»"
+
+        other_desc = f"; открыты также: {', '.join(other_apps[:3])}" if other_apps else ""
+        media_desc = f" | играет: {media_str}" if media_str else ""
+
+        if self._is_video_mode:
+            self.screen_context = f"видео или динамичный контент в {app_id}{media_desc}"
+        elif app_id:
+            if "zed" in app_id.lower():
+                self.screen_context = f"код в Zed: «{title}»{other_desc}{media_desc}"
+            elif "telegram" in app_id.lower():
+                self.screen_context = f"Telegram: чат «{title}»{other_desc}{media_desc}"
+            elif "zen" in app_id.lower() or "browser" in app_id.lower():
+                self.screen_context = f"браузер Zen: вкладка «{title}»{other_desc}{media_desc}"
+            elif "kitty" in app_id.lower() or "terminal" in app_id.lower():
+                self.screen_context = f"терминал Kitty: «{title}»{other_desc}{media_desc}"
             else:
-                self.screen_context = "экран в покое"
+                self.screen_context = f"активно {app_id}: «{title}»{other_desc}{media_desc}"
+        else:
+            self.screen_context = f"рабочий стол driftwm{other_desc}{media_desc}"
 
         # Check trigger: noticeable stabilized change outside video mode
         if (

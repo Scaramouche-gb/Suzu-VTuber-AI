@@ -1,6 +1,13 @@
 """Unit tests for streaming TagParser."""
 
-from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
+from daemon.tagparser import (
+    EmotionTag,
+    GestureTag,
+    LookTag,
+    SilentTag,
+    TagParser,
+    ThoughtTag,
+)
 
 
 def test_tag_parser_simple() -> None:
@@ -81,4 +88,36 @@ def test_tag_parser_unclosed_command_flush() -> None:
     flushed = parser.flush()
     assert len(flushed) == 1
     assert flushed[0].action == "type:Тестовая строка"
+
+
+def test_tag_parser_thought_tags() -> None:
+    parser = TagParser()
+    items = parser.feed("<thought>Саша пишет код в Zed</thought><emo=playful:0.8>Опять кодишь?")
+    assert len(items) == 3
+    assert isinstance(items[0], ThoughtTag)
+    assert items[0].content == "Саша пишет код в Zed"
+    assert isinstance(items[1], EmotionTag)
+    assert items[1].name == "playful"
+    assert items[2] == "Опять кодишь?"
+
+
+def test_tag_parser_thought_inline() -> None:
+    parser = TagParser()
+    items = parser.feed("<thought:размышляет о музыке><emo=happy:0.7>Трек огонь!")
+    assert len(items) == 3
+    assert isinstance(items[0], ThoughtTag)
+    assert items[0].content == "размышляет о музыке"
+    assert isinstance(items[1], EmotionTag)
+    assert items[1].name == "happy"
+    assert items[2] == "Трек огонь!"
+
+
+def test_tag_parser_unclosed_thought_flush() -> None:
+    parser = TagParser()
+    items = parser.feed("<thought>Недописанная мысль без закрывающего тега")
+    assert items == []
+    flushed = parser.flush()
+    assert len(flushed) == 1
+    assert isinstance(flushed[0], ThoughtTag)
+    assert flushed[0].content == "Недописанная мысль без закрывающего тега"
 

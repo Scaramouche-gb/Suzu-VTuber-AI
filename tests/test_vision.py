@@ -2,20 +2,46 @@
 
 from daemon.bus import EventBus
 from daemon.config import VisionConfig
-from daemon.vision import DRIFT_ACTIVE_OUTPUT_RE, DRIFT_ACTIVE_WINDOW_RE, VisionManager
+from daemon.vision import VisionManager
 
 
-def test_driftwm_regex_matching() -> None:
-    line_win = '  * #28 zen [1422, -1081] 1896x931  "(1308) Что сделает ИИ, если дать ПОЛНЫЙ доступ к ПК? - YouTube — Zen Browser"'
-    m = DRIFT_ACTIVE_WINDOW_RE.match(line_win)
-    assert m is not None
-    assert m.group(1) == "zen"
-    assert "Zen Browser" in m.group(2)
-
-    line_out = "  * eDP-1 camera 1422 -1104 zoom 1 1920x1080"
-    m_out = DRIFT_ACTIVE_OUTPUT_RE.match(line_out)
-    assert m_out is not None
-    assert m_out.group(1) == "eDP-1"
+def test_driftwm_state_dict_parsing() -> None:
+    sample_state = {
+        "Ok": {
+            "State": {
+                "outputs": [
+                    {"name": "eDP-1", "active": True},
+                    {"name": "HDMI-A-1", "active": False},
+                ],
+                "windows": [
+                    {
+                        "app_id": "zen",
+                        "title": "GitHub — Zen Browser",
+                        "is_focused": False,
+                        "is_widget": False,
+                    },
+                    {
+                        "app_id": "dev.zed.Zed",
+                        "title": "Suzu-VTuber-AI — main.py",
+                        "is_focused": True,
+                        "is_widget": False,
+                    },
+                    {
+                        "app_id": "quickshell",
+                        "title": "desktop-overlay",
+                        "is_focused": False,
+                        "is_widget": True,
+                    },
+                ],
+            }
+        }
+    }
+    active_app, active_title, active_out, other_apps = VisionManager.parse_driftwm_state_dict(sample_state)
+    assert active_app == "dev.zed.Zed"
+    assert active_title == "Suzu-VTuber-AI — main.py"
+    assert active_out == "eDP-1"
+    assert len(other_apps) == 1
+    assert "zen («GitHub — Zen Browser»)" in other_apps[0]
 
 
 def test_vision_blacklist_privacy() -> None:
