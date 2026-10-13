@@ -53,7 +53,7 @@ class ParsedToken:
 class TagParser:
     """Stateful streaming tag parser with cross-chunk boundary support."""
 
-    def __init__(self, max_tag_length: int = 150) -> None:
+    def __init__(self, max_tag_length: int = 500) -> None:
         self.max_tag_length = max_tag_length
         self._in_tag = False
         self._tag_buffer: list[str] = []
@@ -109,7 +109,13 @@ class TagParser:
         """Flush remaining buffered text at end of stream."""
         output: list[str | TagItem] = []
         if self._in_tag:
-            output.append("<" + "".join(self._tag_buffer))
+            tag_str = "".join(self._tag_buffer).strip()
+            # If stream ended with unclosed tag (e.g. <cmd=type:text without '>'), attempt parse
+            parsed_tag = self._parse_tag_string(tag_str)
+            if parsed_tag:
+                output.append(parsed_tag)
+            else:
+                output.append("<" + "".join(self._tag_buffer))
             self._in_tag = False
             self._tag_buffer = []
         return output
@@ -136,6 +142,14 @@ class TagParser:
 
         cmd_match = CMD_REGEX.match(s)
         if cmd_match:
-            return CommandTag(action=cmd_match.group(1).lower())
+            raw_action = cmd_match.group(1).strip()
+            if ":" in raw_action:
+                prefix, val = raw_action.split(":", 1)
+                prefix_clean = prefix.strip().lower()
+                # Preserve exact case for user text and shell/code commands
+                if prefix_clean in ("type", "term", "code"):
+                    return CommandTag(action=f"{prefix_clean}:{val.strip()}")
+                return CommandTag(action=f"{prefix_clean}:{val.strip().lower()}")
+            return CommandTag(action=raw_action.lower())
 
         return None

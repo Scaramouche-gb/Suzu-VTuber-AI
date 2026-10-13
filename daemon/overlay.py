@@ -43,8 +43,13 @@ def run_overlay(
     settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
     settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
 
-    # Frameless always-on-top window for Wayland / driftwm
-    view.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+    # Frameless always-on-top window that never accepts or steals keyboard focus
+    view.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+    view.setWindowFlags(
+        Qt.WindowType.FramelessWindowHint
+        | Qt.WindowType.WindowStaysOnTopHint
+        | Qt.WindowType.WindowDoesNotAcceptFocus
+    )
 
     # Position in bottom-right corner
     screen = app.primaryScreen()

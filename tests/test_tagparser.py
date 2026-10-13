@@ -64,3 +64,21 @@ def test_tag_parser_command() -> None:
     assert len(items) == 2
     assert items[0].action == "launch:telegram"
     assert items[1] == "Запускаю телегу!"
+
+
+def test_tag_parser_command_preserves_case() -> None:
+    parser = TagParser()
+    items = parser.feed("<cmd=type:Привет, Саша!>Готово")
+    assert len(items) == 2
+    assert items[0].action == "type:Привет, Саша!"
+    assert items[1] == "Готово"
+
+
+def test_tag_parser_unclosed_command_flush() -> None:
+    parser = TagParser()
+    items = parser.feed("<cmd=type:Тестовая строка")
+    assert items == []
+    flushed = parser.flush()
+    assert len(flushed) == 1
+    assert flushed[0].action == "type:Тестовая строка"
+

@@ -23,3 +23,11 @@ async def test_app_launcher_launch_unknown() -> None:
     success, msg = await AppLauncher.launch("nonexistent_fake_app_xyz")
     assert not success
     assert "Не нашла" in msg
+
+
+@pytest.mark.asyncio
+async def test_app_launcher_type_text_empty() -> None:
+    success, msg = await AppLauncher.type_text("")
+    assert not success
+    assert "Пустой текст" in msg
+

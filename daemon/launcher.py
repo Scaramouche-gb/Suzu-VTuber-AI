@@ -167,12 +167,100 @@ class AppLauncher:
             return False, f"Ошибка громкости: {exc}"
 
     @staticmethod
-    async def type_text(text: str, press_enter: bool = False) -> tuple[bool, str]:
-        """Type text into currently active window via wtype or ydotool with clipboard fallback."""
+    async def _get_focused_app() -> str:
+        """Query currently focused window app_id via driftwm IPC."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "driftwm",
+                "msg",
+                "focus",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0 and stdout:
+                return stdout.decode().strip().lower()
+        except (OSError, RuntimeError):
+            pass
+        return ""
+
+    @classmethod
+    async def type_text(cls, text: str, press_enter: bool = False) -> tuple[bool, str]:
+        """Type text into currently active window via layout-independent Wayland paste injection."""
         if not text:
             return False, "Пустой текст для ввода"
 
-        # 1. Native Wayland virtual-keyboard via wtype
+        focused = await cls._get_focused_app()
+        is_terminal = any(
+            t in focused for t in ("kitty", "terminal", "alacritty", "foot", "xterm", "console")
+        )
+
+        # 1. Primary method: wl-copy + wtype paste simulation
+        # Immune to current xkb layout (works identically on US, Russian, etc.) and preserves Unicode/emojis.
+        if shutil.which("wl-copy") and shutil.which("wtype"):
+            try:
+                # Copy target text to clipboard
+                copy_proc = await asyncio.create_subprocess_exec(
+                    "wl-copy",
+                    "--",
+                    text,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await copy_proc.wait()
+
+                # Short settle delay for compositor clipboard synchronization
+                await asyncio.sleep(0.04)
+
+                # Send paste keystroke matching window class
+                if is_terminal:
+                    # In terminal emulators, default clipboard paste is Ctrl+Shift+V
+                    paste_proc = await asyncio.create_subprocess_exec(
+                        "wtype",
+                        "-M",
+                        "ctrl",
+                        "-M",
+                        "shift",
+                        "-k",
+                        "v",
+                        "-m",
+                        "shift",
+                        "-m",
+                        "ctrl",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                else:
+                    # In standard GUI apps (Zed, Zen, Telegram, Discord), default paste is Ctrl+V
+                    paste_proc = await asyncio.create_subprocess_exec(
+                        "wtype",
+                        "-M",
+                        "ctrl",
+                        "-k",
+                        "v",
+                        "-m",
+                        "ctrl",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                await paste_proc.wait()
+
+                if press_enter:
+                    await asyncio.sleep(0.06)
+                    ret_proc = await asyncio.create_subprocess_exec(
+                        "wtype",
+                        "-k",
+                        "Return",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await ret_proc.wait()
+
+                return True, f"Напечатала: {text[:30]}"
+            except (OSError, RuntimeError) as exc:
+                logger.warning("[AppLauncher] Clipboard paste execution failed: %s", exc)
+
+        # 2. Direct wtype keystroke fallback (for simple ASCII or environments without wl-copy)
         if shutil.which("wtype"):
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -195,11 +283,11 @@ class AppLauncher:
                         stderr=asyncio.subprocess.DEVNULL,
                     )
                     await ret_proc.wait()
-                return True, f"Напечатала: {text[:30]}"
+                return True, f"Напечатала через wtype: {text[:30]}"
             except (OSError, RuntimeError) as exc:
                 logger.warning("[AppLauncher] wtype execution failed: %s", exc)
 
-        # 2. ydotool fallback
+        # 3. ydotool fallback
         if shutil.which("ydotool"):
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -225,7 +313,7 @@ class AppLauncher:
             except (OSError, RuntimeError) as exc:
                 logger.warning("[AppLauncher] ydotool execution failed: %s", exc)
 
-        # 3. wl-copy fallback: copies into Wayland clipboard
+        # 4. Pure wl-copy fallback
         if shutil.which("wl-copy"):
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -240,7 +328,7 @@ class AppLauncher:
             except (OSError, RuntimeError) as exc:
                 logger.warning("[AppLauncher] wl-copy execution failed: %s", exc)
 
-        return False, "Не найден инструмент ввода текста (установи wtype)"
+        return False, "Не найден инструмент ввода текста (установи wtype и wl-clipboard)"
 
     @staticmethod
     async def press_key(key: str) -> tuple[bool, str]:
