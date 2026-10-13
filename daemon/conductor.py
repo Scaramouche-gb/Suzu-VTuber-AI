@@ -24,11 +24,12 @@ from daemon.bus import (
     UserSpeechStart,
 )
 from daemon.initiative import InitiativeDecision, InitiativeManager
+from daemon.launcher import AppLauncher
 from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.rag import RAGManager
 from daemon.sentence import SentenceChunk, SentenceSplitter
-from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
+from daemon.tagparser import CommandTag, EmotionTag, GestureTag, LookTag, SilentTag, TagParser
 from daemon.tencent_bridge import TencentMemoryBridge
 from daemon.tts import BaseTTSEngine, get_audio_path, save_audio_file
 from daemon.ws_server import WebSocketServer
@@ -65,6 +66,8 @@ class Conductor:
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
+        if self.memory:
+            asyncio.create_task(self._restore_history_from_memory())
         self._current_gen_task: asyncio.Task[None] | None = None
         self._initiative_task: asyncio.Task[None] | None = None
         self._utterance_counter = 0
@@ -101,6 +104,21 @@ class Conductor:
             await self.memory.close()
         if self.tencent:
             await self.tencent.close()
+
+    async def _restore_history_from_memory(self) -> None:
+        """Restore previous dialogue turns from persistent SQLite database."""
+        if not self.memory:
+            return
+        try:
+            recent = await self.memory.get_recent_messages(limit=16)
+            if recent:
+                self.history = recent
+                logger.info(
+                    "[Memory] Restored %d dialogue turns from persistent memory",
+                    len(recent),
+                )
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.warning("[Memory] Failed to restore history: %s", exc)
 
     def set_state(self, new_state: str) -> None:
         """Update and broadcast state."""
@@ -248,6 +266,18 @@ class Conductor:
                         self.memory.update_user_name_facts(detected_name, wrong_name)
                     )
 
+        # Direct desktop app launch intent recognition
+        launch_match = re.search(
+            r"\b(?:запусти|открой|включи|стартани)\s+([a-zA-Zа-яёА-ЯЁ0-9_-]+)\b",
+            user_text,
+            re.IGNORECASE,
+        )
+        if launch_match:
+            cand = launch_match.group(1).lower()
+            if AppLauncher.resolve_app_command(cand):
+                logger.info("[Conductor] Detected direct launch intent for '%s'", cand)
+                asyncio.create_task(AppLauncher.launch(cand))
+
         # Context block from vision
         if context_info is None and self.vision:
             context_info = f"активное окно: {self.vision.active_app} ({self.vision.active_title}); {self.vision.screen_context}"
@@ -389,6 +419,9 @@ class Conductor:
         t_first_token = 0.0
         t_first_audio = 0.0
 
+        active_turn_emo = "neutral"
+        active_turn_intensity = 1.0
+
         try:
             async for token in self.llm.stream_response(messages, model=target_model):
                 if not first_token_received:
@@ -401,11 +434,18 @@ class Conductor:
                         full_reply_text.append(item)
                         ready_chunks = sentence_splitter.feed(item)
                         for chunk in ready_chunks:
-                            await self._dispatch_sentence_chunk(chunk)
+                            await self._dispatch_sentence_chunk(
+                                chunk,
+                                default_emo=active_turn_emo,
+                                default_intensity=active_turn_intensity,
+                            )
                             if not first_audio_dispatched:
                                 first_audio_dispatched = True
                                 t_first_audio = time.time()
                     else:
+                        if isinstance(item, EmotionTag):
+                            active_turn_emo = item.name
+                            active_turn_intensity = item.intensity
                         await self._handle_tag(item, sentence_splitter)
 
             # Flush remaining buffers
@@ -415,11 +455,19 @@ class Conductor:
                     full_reply_text.append(r_tag)
                     ready_chunks = sentence_splitter.feed(r_tag)
                     for chunk in ready_chunks:
-                        await self._dispatch_sentence_chunk(chunk)
+                        await self._dispatch_sentence_chunk(
+                            chunk,
+                            default_emo=active_turn_emo,
+                            default_intensity=active_turn_intensity,
+                        )
 
             final_chunks = sentence_splitter.flush()
             for chunk in final_chunks:
-                await self._dispatch_sentence_chunk(chunk)
+                await self._dispatch_sentence_chunk(
+                    chunk,
+                    default_emo=active_turn_emo,
+                    default_intensity=active_turn_intensity,
+                )
 
             reply_str = "".join(full_reply_text).strip()
             if reply_str:
@@ -498,12 +546,23 @@ class Conductor:
             await self.ws.broadcast({"type": "look", "target": tag.target})
             splitter.add_tag(tag)
 
-    async def _dispatch_sentence_chunk(self, chunk: SentenceChunk) -> None:
+        elif isinstance(tag, CommandTag):
+            logger.info("[Tag] Command requested: %s", tag.action)
+            if tag.action.startswith("launch:"):
+                target = tag.action.split("launch:", 1)[1]
+                asyncio.create_task(AppLauncher.launch(target))
+
+    async def _dispatch_sentence_chunk(
+        self,
+        chunk: SentenceChunk,
+        default_emo: str = "neutral",
+        default_intensity: float = 1.0,
+    ) -> None:
         self._utterance_counter += 1
         utt_id = f"u{self._utterance_counter}"
 
-        primary_emo = "neutral"
-        intensity = 1.0
+        primary_emo = default_emo
+        intensity = default_intensity
         primary_gst = None
 
         for t in chunk.tags:

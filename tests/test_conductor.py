@@ -72,3 +72,22 @@ async def test_conductor_barge_in_interrupt() -> None:
     types = [m["type"] for m in ws_mock.sent_messages]
     assert "stop" in types
     assert conductor.state == "idle"
+
+
+@pytest.mark.asyncio
+async def test_conductor_command_tag() -> None:
+    cfg = Config()
+    bus = EventBus()
+    ws_mock = MockWebSocketServer(cfg, bus)
+    llm = LLMClient(cfg.llm, dry_run=True)
+    conductor = Conductor(llm=llm, ws_server=ws_mock, bus=bus)
+
+    # Simulate command tag execution
+    from daemon.sentence import SentenceSplitter
+    from daemon.tagparser import CommandTag
+
+    splitter = SentenceSplitter()
+    await conductor._handle_tag(CommandTag(action="launch:telegram"), splitter)
+    # Shouldn't raise any exception
+    await conductor.close()
+

@@ -66,9 +66,22 @@ class RAGManager:
             results[1] if isinstance(results[1], list) else []
         )
 
+        # Check if query references past dialogue statements
+        past_dialogue_notes: list[str] = []
+        if self.memory and any(
+            w in query.lower()
+            for w in (
+                "сказала", "говорила", "помнишь", "было", "ответ", "назвала", "спросила", "ты же", "мы говорили"
+            )
+        ):
+            past_msgs = await self.memory.search_recent_messages(query, limit=2)
+            for m in past_msgs:
+                role_label = "Сузу" if m["role"] == "assistant" else "Саша"
+                past_dialogue_notes.append(f"Ранее {role_label} говорил(а): «{m['text']}»")
+
         # Merge, deduplicate, and compact
         merged: list[str] = []
-        for note in tencent_notes + local_facts:
+        for note in past_dialogue_notes + tencent_notes + local_facts:
             clean = note.strip()
             if not clean:
                 continue

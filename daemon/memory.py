@@ -169,6 +169,22 @@ class MemoryManager:
             result.append({"role": role, "content": text})
         return result
 
+    async def search_recent_messages(self, query: str, limit: int = 5) -> list[dict[str, str]]:
+        """Search past dialogue turns by keyword."""
+        clean = re.sub(r"[^\w\sа-яА-ЯёЁ]", " ", query).strip()
+        tokens = [t for t in clean.split() if len(t) >= 2]
+        if not tokens:
+            return []
+        conn = await self._get_conn()
+        clause = " OR ".join("text LIKE ?" for _ in tokens[:4])
+        params = [f"%{t}%" for t in tokens[:4]] + [limit]
+        async with conn.execute(
+            f"SELECT role, text FROM messages WHERE {clause} ORDER BY id DESC LIMIT ?",
+            params,
+        ) as cur:
+            rows = await cur.fetchall()
+            return [{"role": r[0], "text": r[1]} for r in rows]
+
     async def add_fact(self, text: str, importance: float = 1.0) -> int:
         """Add or update a user fact."""
         clean_text = sanitize_sensitive_data(text.strip())
