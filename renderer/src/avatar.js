@@ -72,12 +72,12 @@ export class AvatarController {
   updateCameraPlacement() {
     if (this.fitMode === 'bust') {
       // Focus on bust (chest, shoulders and head nicely framed with breathing room)
-      this.camera.position.set(0, 1.28 + this.yOffset, 2.1 / this.scale);
-      this.camera.lookAt(0, 1.22 + this.yOffset, 0);
+      this.camera.position.set(0, 1.16 + this.yOffset, 1.85 / this.scale);
+      this.camera.lookAt(0, 1.10 + this.yOffset, 0);
     } else {
       // Full body view
-      this.camera.position.set(0, 0.9 + this.yOffset, 3.6 / this.scale);
-      this.camera.lookAt(0, 0.85 + this.yOffset, 0);
+      this.camera.position.set(0, 0.75 + this.yOffset, 3.2 / this.scale);
+      this.camera.lookAt(0, 0.70 + this.yOffset, 0);
     }
   }
 
@@ -117,7 +117,6 @@ export class AvatarController {
 
     VRMUtils.removeUnnecessaryVertices(gltf.scene);
     VRMUtils.combineSkeletons(gltf.scene);
-    VRMUtils.rotateVRM0(vrm);
 
     if (this.vrm) {
       this.scene.remove(this.vrm.scene);
@@ -203,16 +202,16 @@ export class AvatarController {
     const leftShoulder = this.vrm.humanoid.getNormalizedBoneNode('leftShoulder');
 
     if (leftUpperArm) {
-      leftUpperArm.rotation.set(0.08, 0.05, -1.28 + breathAngle * 0.3);
+      leftUpperArm.rotation.set(0.08, 0.05, 1.25 - breathAngle * 0.3);
     }
     if (leftLowerArm) {
-      leftLowerArm.rotation.set(0.18, 0.0, -0.12);
+      leftLowerArm.rotation.set(0.18, 0.0, 0.12);
     }
     if (leftHand) {
-      leftHand.rotation.set(0.05, 0.0, -0.05);
+      leftHand.rotation.set(0.05, 0.0, 0.05);
     }
     if (leftShoulder) {
-      leftShoulder.rotation.set(0.0, 0.0, -0.04);
+      leftShoulder.rotation.set(0.0, 0.0, 0.04);
     }
 
     const rightUpperArm = this.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
@@ -221,16 +220,16 @@ export class AvatarController {
     const rightShoulder = this.vrm.humanoid.getNormalizedBoneNode('rightShoulder');
 
     if (rightUpperArm) {
-      rightUpperArm.rotation.set(0.08, -0.05, 1.28 - breathAngle * 0.3);
+      rightUpperArm.rotation.set(0.08, -0.05, -1.25 + breathAngle * 0.3);
     }
     if (rightLowerArm) {
-      rightLowerArm.rotation.set(0.18, 0.0, 0.12);
+      rightLowerArm.rotation.set(0.18, 0.0, -0.12);
     }
     if (rightHand) {
-      rightHand.rotation.set(0.05, 0.0, 0.05);
+      rightHand.rotation.set(0.05, 0.0, -0.05);
     }
     if (rightShoulder) {
-      rightShoulder.rotation.set(0.0, 0.0, 0.04);
+      rightShoulder.rotation.set(0.0, 0.0, -0.04);
     }
   }
 
