@@ -6,7 +6,6 @@ Listens on 127.0.0.1:5055 and provides voice generation / cloning using Coqui XT
 from __future__ import annotations
 
 import argparse
-import io
 import logging
 import os
 import tempfile
@@ -14,12 +13,32 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-import scipy.io.wavfile
+import soundfile as sf
 import torch
+import torchaudio
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+
+# Patch torchaudio 2.11+ to use soundfile instead of requiring missing TorchCodec
+def _sf_load(uri, **kwargs):
+    data, sr = sf.read(uri, dtype="float32")
+    if data.ndim == 1:
+        tensor = torch.from_numpy(data).unsqueeze(0)
+    else:
+        tensor = torch.from_numpy(data.T)
+    return tensor, sr
+
+def _sf_save(uri, src, sample_rate, **kwargs):
+    if isinstance(src, torch.Tensor):
+        src = src.detach().cpu().numpy()
+    if src.ndim == 2:
+        src = src.T
+    sf.write(uri, src, sample_rate)
+
+torchaudio.load = _sf_load
+torchaudio.save = _sf_save
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("xtts_sidecar")
@@ -40,9 +59,14 @@ class SynthesizeRequest(BaseModel):
 def init_xtts(model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2") -> None:
     """Preload XTTS-v2 model onto GPU or CPU."""
     global tts_model, is_model_ready
+    os.environ["COQUI_TOS_AGREED"] = "1"
     use_gpu = torch.cuda.is_available()
     device_str = "cuda" if use_gpu else "cpu"
     logger.info("Initializing XTTS-v2 model '%s' on %s...", model_name, device_str)
+
+    # PyTorch 2.6+ changed default weights_only to True, which breaks Coqui model unpickling
+    _orig_load = torch.load
+    torch.load = lambda *a, **kw: _orig_load(*a, **dict(kw, weights_only=False))
 
     try:
         from TTS.api import TTS
@@ -50,9 +74,11 @@ def init_xtts(model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2")
         tts_model = TTS(model_name, gpu=use_gpu)
         is_model_ready = True
         logger.info("XTTS-v2 model preloaded successfully and ready for inference")
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("Failed to load XTTS-v2 model: %s", exc)
         is_model_ready = False
+    finally:
+        torch.load = _orig_load
 
 
 @asynccontextmanager
@@ -80,7 +106,6 @@ async def health() -> dict[str, Any]:
 @app.post("/synthesize")
 async def synthesize(req: SynthesizeRequest) -> Response:
     """Generate cloned speech from text and reference speaker WAV."""
-    global tts_model, is_model_ready
     if not is_model_ready or tts_model is None:
         raise HTTPException(status_code=503, detail="XTTS model is not ready or failed to load")
 
@@ -135,7 +160,7 @@ async def synthesize(req: SynthesizeRequest) -> Response:
 
         return Response(content=wav_bytes, media_type="audio/wav")
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.error("Synthesis error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
