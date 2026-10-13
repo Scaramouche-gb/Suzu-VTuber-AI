@@ -71,79 +71,92 @@ export class GestureManager {
 
     switch (this.activeGesture) {
       case 'nod': {
-        const nodSin = Math.sin(progress * Math.PI * 4); // 2 smooth nods
-        if (head) head.rotation.x += nodSin * 0.14 * envelope;
-        if (neck) neck.rotation.x += nodSin * 0.06 * envelope;
+        const nodSin = Math.sin(progress * Math.PI * 4); // 2 smooth polite nods
+        if (head) head.rotation.x += nodSin * 0.11 * envelope;
+        if (neck) neck.rotation.x += nodSin * 0.05 * envelope;
         break;
       }
 
       case 'shake': {
-        const shakeSin = Math.sin(progress * Math.PI * 5); // head shake
-        if (head) head.rotation.y += shakeSin * 0.18 * envelope;
+        const shakeSin = Math.sin(progress * Math.PI * 5); // expressive "no"
+        if (head) head.rotation.y += shakeSin * 0.15 * envelope;
+        if (neck) neck.rotation.y += shakeSin * 0.05 * envelope;
         break;
       }
 
       case 'think': {
+        // Pensive tilt and hand toward chin
         if (head) {
-          head.rotation.z += 0.12 * envelope;
-          head.rotation.x -= 0.08 * envelope;
+          head.rotation.z += 0.09 * envelope;
+          head.rotation.x -= 0.06 * envelope;
         }
         if (rightUpperArm) {
-          rightUpperArm.rotation.z += -1.35 * envelope;
-          rightUpperArm.rotation.x += 0.55 * envelope;
+          rightUpperArm.rotation.z += 0.85 * envelope; // raise arm up towards chest
+          rightUpperArm.rotation.x += 0.40 * envelope;
+          rightUpperArm.rotation.y += 0.25 * envelope;
         }
         if (rightLowerArm) {
-          rightLowerArm.rotation.z += 1.2 * envelope;
+          rightLowerArm.rotation.z += 0.65 * envelope;
+          rightLowerArm.rotation.y += 0.40 * envelope;
         }
         break;
       }
 
       case 'shrug': {
-        const shrugLift = 0.16 * envelope;
-        if (leftShoulder) leftShoulder.rotation.z -= shrugLift;
-        if (rightShoulder) rightShoulder.rotation.z += shrugLift;
-        if (head) head.rotation.z += Math.sin(progress * Math.PI * 2) * 0.04;
+        // Shoulders lift upward naturally, arms open slightly
+        const shrugLift = 0.12 * envelope;
+        if (leftShoulder) leftShoulder.rotation.z += shrugLift;
+        if (rightShoulder) rightShoulder.rotation.z -= shrugLift;
+        if (leftUpperArm) leftUpperArm.rotation.z -= 0.15 * envelope;
+        if (rightUpperArm) rightUpperArm.rotation.z += 0.15 * envelope;
+        if (head) head.rotation.z += Math.sin(progress * Math.PI * 2) * 0.04 * envelope;
         break;
       }
 
       case 'wave': {
+        // Raise right arm up to wave level (positive Z in three-vrm)
         if (rightUpperArm) {
-          rightUpperArm.rotation.z += -1.55 * envelope;
-          rightUpperArm.rotation.x += 0.35 * envelope;
+          rightUpperArm.rotation.z += 1.45 * envelope;
+          rightUpperArm.rotation.x += 0.25 * envelope;
         }
         if (rightLowerArm) {
-          rightLowerArm.rotation.z += 1.05 * envelope;
+          rightLowerArm.rotation.z += 0.55 * envelope;
+          rightLowerArm.rotation.y += 0.35 * envelope;
         }
         if (rightHand) {
           const waveSin = Math.sin(progress * Math.PI * 8);
-          rightHand.rotation.z += waveSin * 0.28 * envelope;
+          rightHand.rotation.z += waveSin * 0.22 * envelope;
         }
         break;
       }
 
       case 'laugh': {
-        const laughVibe = Math.sin(progress * Math.PI * 14) * 0.02;
-        if (head) head.rotation.x += (-0.06 + laughVibe) * envelope;
-        if (chest) chest.rotation.x += laughVibe * 0.6 * envelope;
+        const laughVibe = Math.sin(progress * Math.PI * 12) * 0.025;
+        if (head) head.rotation.x += (-0.05 + laughVibe) * envelope;
+        if (neck) neck.rotation.x += laughVibe * 0.5 * envelope;
+        if (chest) chest.rotation.x += laughVibe * 0.7 * envelope;
         break;
       }
 
       case 'facepalm': {
-        if (head) head.rotation.x += 0.12 * envelope;
+        // Hand to forehead, head bowed in disbelief
+        if (head) head.rotation.x += 0.14 * envelope;
         if (rightUpperArm) {
-          rightUpperArm.rotation.z += -1.35 * envelope;
-          rightUpperArm.rotation.x += 0.65 * envelope;
+          rightUpperArm.rotation.z += 1.25 * envelope; // lift right arm up towards face
+          rightUpperArm.rotation.x += 0.55 * envelope;
+          rightUpperArm.rotation.y += 0.35 * envelope;
         }
         if (rightLowerArm) {
-          rightLowerArm.rotation.z += 1.35 * envelope;
+          rightLowerArm.rotation.z += 0.90 * envelope;
+          rightLowerArm.rotation.y += 0.50 * envelope;
         }
         break;
       }
 
       case 'surprise': {
-        if (head) head.rotation.x -= 0.10 * envelope;
-        if (leftShoulder) leftShoulder.rotation.z -= 0.08 * envelope;
-        if (rightShoulder) rightShoulder.rotation.z += 0.08 * envelope;
+        if (head) head.rotation.x -= 0.09 * envelope;
+        if (leftShoulder) leftShoulder.rotation.z += 0.08 * envelope;
+        if (rightShoulder) rightShoulder.rotation.z -= 0.08 * envelope;
         break;
       }
     }

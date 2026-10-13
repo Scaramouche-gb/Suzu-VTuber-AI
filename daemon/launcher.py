@@ -96,3 +96,72 @@ class AppLauncher:
         except (OSError, RuntimeError) as exc:
             logger.error("[AppLauncher] Failed to launch '%s': %s", app_name, exc)
             return False, f"Ошибка запуска {app_name}: {exc}"
+
+    @classmethod
+    async def close(cls, app_name: str) -> tuple[bool, str]:
+        """Close an application by process pattern or binary name."""
+        clean_name = app_name.strip().lower()
+        candidates = APP_ALIASES.get(clean_name, [clean_name])
+
+        for cand in candidates:
+            # Strip path if full path
+            bin_name = Path(cand).name.removesuffix(".desktop")
+
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "pkill",
+                    "-f",
+                    bin_name,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                if proc.returncode == 0:
+                    logger.info("[AppLauncher] Closed process matching '%s'", bin_name)
+                    return True, f"Закрыла {clean_name}"
+            except (OSError, RuntimeError) as exc:
+                logger.debug("[AppLauncher] pkill '%s' error: %s", bin_name, exc)
+
+        return False, f"Не смогла закрыть «{app_name}»"
+
+    @staticmethod
+    async def media(action: str) -> tuple[bool, str]:
+        """Control media playback via playerctl (play-pause, next, previous)."""
+        if not shutil.which("playerctl"):
+            return False, "playerctl не установлен"
+
+        act = action.strip().lower()
+        cmd_arg = "play-pause" if act in ("play-pause", "toggle", "pause", "play") else act
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "playerctl",
+                cmd_arg,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            return True, f"Медиа: {cmd_arg}"
+        except (OSError, RuntimeError) as exc:
+            return False, f"Ошибка медиа: {exc}"
+
+    @staticmethod
+    async def volume(direction: str) -> tuple[bool, str]:
+        """Adjust system volume via wpctl (+5% / -5%)."""
+        if not shutil.which("wpctl"):
+            return False, "wpctl не установлен"
+
+        delta = "+5%" if direction in ("up", "+", "louder") else "-5%"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "wpctl",
+                "set-volume",
+                "@DEFAULT_AUDIO_SINK@",
+                delta,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            return True, f"Громкость {delta}"
+        except (OSError, RuntimeError) as exc:
+            return False, f"Ошибка громкости: {exc}"

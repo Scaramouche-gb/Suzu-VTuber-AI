@@ -38,8 +38,9 @@ html, body {
   pointer-events: none;
 }
 
-/* Debug panel */
+/* Debug panel (hidden by default) */
 #debug-panel {
+  display: none;
   position: absolute;
   top: 12px;
   left: 12px;
@@ -52,10 +53,13 @@ html, body {
   z-index: 100;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
   font-size: 12px;
-  display: flex;
   flex-direction: column;
   gap: 8px;
   transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+#debug-panel.visible {
+  display: flex;
 }
 
 #debug-panel.minimized .panel-content {

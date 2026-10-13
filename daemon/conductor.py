@@ -281,7 +281,7 @@ class Conductor:
 
         # Direct desktop app launch intent recognition
         launch_match = re.search(
-            r"\b(?:запусти|открой|включи|стартани)\s+([a-zA-Zа-яёА-ЯЁ0-9_-]+)\b",
+            r"\b(?:запусти|открой|стартани)\s+([a-zA-Zа-яёА-ЯЁ0-9_-]+)\b",
             user_text,
             re.IGNORECASE,
         )
@@ -290,6 +290,33 @@ class Conductor:
             if AppLauncher.resolve_app_command(cand):
                 logger.info("[Conductor] Detected direct launch intent for '%s'", cand)
                 asyncio.create_task(AppLauncher.launch(cand))
+
+        # Close app intent recognition
+        close_match = re.search(
+            r"\b(?:закрой|прибей|выключи|кильни)\s+([a-zA-Zа-яёА-ЯЁ0-9_-]+)\b",
+            user_text,
+            re.IGNORECASE,
+        )
+        if close_match:
+            cand = close_match.group(1).lower()
+            logger.info("[Conductor] Detected close intent for '%s'", cand)
+            asyncio.create_task(AppLauncher.close(cand))
+
+        # Media playback intent recognition
+        if re.search(r"\b(?:пауза|плей|музык|трек|стоп трек|след трек|следующий трек)\b", user_text, re.IGNORECASE):
+            low = user_text.lower()
+            if "след" in low:
+                asyncio.create_task(AppLauncher.media("next"))
+            elif "пред" in low:
+                asyncio.create_task(AppLauncher.media("previous"))
+            else:
+                asyncio.create_task(AppLauncher.media("play-pause"))
+
+        # Volume control intent recognition
+        if re.search(r"\b(?:погромче|сделай громче|прибавь звук)\b", user_text, re.IGNORECASE):
+            asyncio.create_task(AppLauncher.volume("up"))
+        elif re.search(r"\b(?:потише|сделай тише|убавь звук)\b", user_text, re.IGNORECASE):
+            asyncio.create_task(AppLauncher.volume("down"))
 
         # Context block from vision
         if context_info is None and self.vision:
@@ -575,6 +602,15 @@ class Conductor:
             if tag.action.startswith("launch:"):
                 target = tag.action.split("launch:", 1)[1]
                 asyncio.create_task(AppLauncher.launch(target))
+            elif tag.action.startswith("close:"):
+                target = tag.action.split("close:", 1)[1]
+                asyncio.create_task(AppLauncher.close(target))
+            elif tag.action.startswith("media:"):
+                act = tag.action.split("media:", 1)[1]
+                asyncio.create_task(AppLauncher.media(act))
+            elif tag.action.startswith("volume:"):
+                direction = tag.action.split("volume:", 1)[1]
+                asyncio.create_task(AppLauncher.volume(direction))
 
     async def _dispatch_sentence_chunk(
         self,

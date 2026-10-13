@@ -40,10 +40,18 @@ const unlockAudio = () => {
   lipsync.ensureContext();
 };
 window.addEventListener('pointerdown', unlockAudio, { passive: true });
+const debugPanel = document.getElementById('debug-panel');
+if (params.get('debug') === '1' && debugPanel) {
+  debugPanel.classList.add('visible');
+}
+
 window.addEventListener('keydown', (e) => {
   unlockAudio();
   if (e.key === 'f' || e.key === 'F') {
     avatar.flip();
+  }
+  if ((e.ctrlKey && (e.key === 'd' || e.key === 'D')) || e.key === 'F12') {
+    if (debugPanel) debugPanel.classList.toggle('visible');
   }
 });
 window.addEventListener('dblclick', () => {
