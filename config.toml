@@ -41,11 +41,11 @@ pitch = "+2Hz"
 pitch_shift = 1.04
 
 [tts.rvc]
-enabled = false
+enabled = true
 mode = "sidecar"
 server_url = "http://127.0.0.1:5050/infer"
-model_path = ""
-index_path = ""
+model_path = "models/rvc/hutao/Hutao_v2.pth"
+index_path = "models/rvc/hutao/added_IVF459_Flat_nprobe_1_Hutao_v2_v2.index"
 f0_up_key = 0
 
 [vision]

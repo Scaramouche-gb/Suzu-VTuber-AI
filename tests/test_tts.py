@@ -91,3 +91,29 @@ async def test_conductor_with_tts_audio_dispatch() -> None:
     for say in say_msgs:
         assert "audio_url" in say
         assert say["audio_url"].startswith("/audio/")
+
+
+@pytest.mark.asyncio
+async def test_rvc_disabled() -> None:
+    from daemon.config import RVCConfig
+    from daemon.rvc import RVCVoiceConverter
+
+    converter = RVCVoiceConverter(RVCConfig(enabled=False))
+    result = await converter.convert(b"test-audio-bytes")
+    assert result == b"test-audio-bytes"
+    await converter.close()
+
+
+@pytest.mark.asyncio
+async def test_rvc_sidecar_fallback_on_unreachable() -> None:
+    from daemon.config import RVCConfig
+    from daemon.rvc import RVCVoiceConverter
+
+    converter = RVCVoiceConverter(
+        RVCConfig(enabled=True, mode="sidecar", server_url="http://127.0.0.1:59999/infer")
+    )
+    result = await converter.convert(b"test-audio-bytes")
+    # Gracefully falls back to original audio
+    assert result == b"test-audio-bytes"
+    await converter.close()
+

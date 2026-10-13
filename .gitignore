@@ -63,3 +63,8 @@ project_dump.xml
 *.mp3
 *.zip
 
+# ML Weights & Sidecars
+models/
+sidecars/**/.venv/
+
+
