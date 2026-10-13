@@ -166,6 +166,7 @@ function animate(currentTime) {
   lastTime = currentTime - (deltaMs % interval);
 
   // 1. Prepare base pose with natural idle, breathing, and hip/spine sway
+  avatar.setSpeechVolume(lipsync.currentVolume);
   avatar.preparePose(delta);
 
   // 2. Layer procedural gestures (nod, shrug, wave, think, laugh) on top
