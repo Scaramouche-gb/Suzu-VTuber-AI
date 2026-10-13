@@ -707,6 +707,7 @@ class Conductor:
                 episodes=episodes_list,
                 image_base64=image_base64,
                 project_notes=project_notes,
+                is_proactive=True,
             )
             target_model = self.llm.cfg.fast_model
         else:
@@ -718,6 +719,7 @@ class Conductor:
                 episodes=episodes_list,
                 image_base64=image_base64,
                 project_notes=project_notes,
+                is_proactive=False,
             )
             target_model = self.llm.cfg.chat_model
 

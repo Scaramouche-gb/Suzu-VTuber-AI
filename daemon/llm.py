@@ -88,6 +88,7 @@ class LLMClient:
         episodes: list[str] | None = None,
         image_base64: str | None = None,
         project_notes: list[str] | None = None,
+        is_proactive: bool = False,
     ) -> list[dict[str, Any]]:
         """Assemble system prompt, history, context, and user replica."""
         messages: list[dict[str, Any]] = []
@@ -115,12 +116,15 @@ class LLMClient:
             messages.extend(history)
 
         # Context block
-        now_str = datetime.now().strftime("%H:%M, %A")
-        context_prefix = f"КОНТЕКСТ: время {now_str}"
-        if context_info:
-            context_prefix += f"; {context_info}"
-
-        user_content_text = f"{context_prefix}\n----\nРЕПЛИКА: «{user_message}»"
+        if is_proactive:
+            user_content_text = user_message
+        else:
+            now_str = datetime.now().strftime("%H:%M, %A")
+            context_parts = [f"время {now_str}"]
+            if context_info:
+                context_parts.append(f"на экране: {context_info}")
+            env_line = " | ".join(context_parts)
+            user_content_text = f"[Окружение: {env_line}]\nРеплика Саши: «{user_message}»"
 
         if image_base64:
             messages.append(
