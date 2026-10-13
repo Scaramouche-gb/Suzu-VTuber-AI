@@ -164,6 +164,11 @@ class Conductor:
                 chunk = SentenceChunk(text=text)
                 await self._dispatch_sentence_chunk(chunk)
 
+        elif cmd == "ask":
+            text = args.get("text", "")
+            if text:
+                await self.bus.publish(UserSpeech(audio_data=b"", text=text))
+
         elif cmd == "look":
             target = args.get("target", "cursor")
             await self.ws.broadcast({"type": "look", "target": target})

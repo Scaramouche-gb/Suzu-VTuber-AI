@@ -86,6 +86,17 @@ def cmd_say(args: argparse.Namespace) -> None:
     print(f"Dispatched say: «{text}» ({res.get('status')})")
 
 
+def cmd_ask(args: argparse.Namespace) -> None:
+    text = " ".join(args.text).strip()
+    if not text:
+        print("[vtuberctl Error] Missing text argument to ask", file=sys.stderr)
+        sys.exit(1)
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "ask", "args": {"text": text}}
+    )
+    print(f"Asked Suzu: «{text}» ({res.get('status')})")
+
+
 def cmd_look(args: argparse.Namespace) -> None:
     target = args.target.lower()
     res = _request_json(
@@ -179,6 +190,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_say = subparsers.add_parser("say", help="Force avatar to speak custom text")
     p_say.add_argument("text", nargs="+", help="Text to speak")
     p_say.set_defaults(func=cmd_say)
+
+    # ask
+    p_ask = subparsers.add_parser("ask", help="Send user prompt/question to Suzu")
+    p_ask.add_argument("text", nargs="+", help="Prompt/question to ask")
+    p_ask.set_defaults(func=cmd_ask)
 
     # look
     p_look = subparsers.add_parser("look", help="Change avatar gaze target")

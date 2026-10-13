@@ -46,6 +46,11 @@ def test_ctl_argparser() -> None:
     assert args.command == "say"
     assert args.text == ["Привет", "мир!"]
 
+    # ask
+    args = parser.parse_args(["ask", "Что", "нового?"])
+    assert args.command == "ask"
+    assert args.text == ["Что", "нового?"]
+
     # look
     args = parser.parse_args(["look", "screen"])
     assert args.command == "look"
