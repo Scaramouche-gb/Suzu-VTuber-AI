@@ -34,6 +34,16 @@ class UserSpeech(Event):
 
 
 @dataclass(slots=True)
+class SystemSpeech(Event):
+    """Fired when voices or speech from desktop audio (Discord, Telegram, video) are captured."""
+
+    audio_data: Any = None
+    duration_s: float = 0.0
+    text: str = ""
+    app_hint: str = ""
+
+
+@dataclass(slots=True)
 class ScreenChange(Event):
     """Fired when screen content changes noticeably."""
 

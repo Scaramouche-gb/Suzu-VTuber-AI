@@ -64,6 +64,16 @@ class AudioInConfig(BaseModel):
     preroll_ms: int = 300
 
 
+class SystemAudioConfig(BaseModel):
+    enabled: bool = True
+    device: str = ""
+    sample_rate: int = 16000
+    vad_threshold: float = 0.50
+    min_speech_ms: int = 350
+    end_silence_ms: int = 750
+    preroll_ms: int = 350
+
+
 class RVCConfig(BaseModel):
     enabled: bool = False
     mode: str = "sidecar"  # "sidecar" or "onnx"
@@ -123,6 +133,7 @@ class Config(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     stt: STTConfig = Field(default_factory=STTConfig)
     audio_in: AudioInConfig = Field(default_factory=AudioInConfig)
+    system_audio: SystemAudioConfig = Field(default_factory=SystemAudioConfig)
     tts: TTSConfig = Field(default_factory=TTSConfig)
     vision: VisionConfig = Field(default_factory=VisionConfig)
     initiative: InitiativeConfig = Field(default_factory=InitiativeConfig)

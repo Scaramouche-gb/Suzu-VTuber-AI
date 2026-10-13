@@ -36,6 +36,7 @@ class FrameRecord:
     app_id: str
     title: str
     diff_ratio: float
+    window_jpeg_bytes: bytes | None = None
 
 
 class VisionManager:
@@ -53,6 +54,7 @@ class VisionManager:
         self.screen_context: str = "экран в покое"
         self.active_app: str = ""
         self.active_title: str = ""
+        self.active_geometry: str = ""
         self.other_apps: list[str] = []
         self.media_context: str = ""
 
@@ -119,6 +121,16 @@ class VisionManager:
 
             data = json.loads(stdout.decode("utf-8", errors="replace"))
             active_app, active_title, active_output, other_apps = self.parse_driftwm_state_dict(data)
+
+            # Extract window geometry for focused window
+            state_data = data.get("Ok", {}).get("State", {}) if "Ok" in data else data.get("State", data)
+            for w in state_data.get("windows", []):
+                if w.get("is_focused") and not w.get("is_widget"):
+                    pos = w.get("position")
+                    size = w.get("size")
+                    if pos and size and len(pos) >= 2 and len(size) >= 2:
+                        self.active_geometry = f"{pos[0]},{pos[1]} {size[0]}x{size[1]}"
+                    break
 
             # Fallback if focus is not marked on windows
             if not active_app:
@@ -211,6 +223,38 @@ class VisionManager:
             logger.warning("grim capture failed: %s", exc)
             return b""
 
+    async def capture_window_jpeg(self, geometry: str | None = None) -> bytes:
+        """Capture cropped focused window screenshot via grim into memory bytes."""
+        if not shutil.which("grim"):
+            return b""
+
+        target_geom = geometry or self.active_geometry
+        if not target_geom:
+            return b""
+
+        cmd = [
+            "grim",
+            "-g",
+            target_geom,
+            "-t",
+            "jpeg",
+            "-q",
+            str(self.cfg.jpeg_quality or 85),
+            "-",
+        ]
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            return stdout
+        except (OSError, TimeoutError) as exc:
+            logger.warning("grim window capture failed: %s", exc)
+            return b""
+
     def set_blind_mode(self, enabled: bool) -> None:
         self.blind_mode = enabled
         logger.info("Vision blind mode %s", "ENABLED" if enabled else "DISABLED")
@@ -291,6 +335,11 @@ class VisionManager:
         self._last_small_img = small_arr
         self._last_phash = current_phash
 
+        # Capture focused window crop if geometry is available
+        window_crop_bytes: bytes | None = None
+        if self.active_geometry and not self._is_video_mode:
+            window_crop_bytes = await self.capture_window_jpeg()
+
         # Save to ring buffer
         rec = FrameRecord(
             timestamp=now,
@@ -298,6 +347,7 @@ class VisionManager:
             app_id=app_id,
             title=title,
             diff_ratio=diff_ratio,
+            window_jpeg_bytes=window_crop_bytes,
         )
         self.frame_buffer.append(rec)
 
@@ -344,17 +394,21 @@ class VisionManager:
                 hash_diff,
                 app_id,
             )
+            trigger_image = window_crop_bytes or jpeg_data
             await self.bus.publish(
                 ScreenChange(
-                    image_bytes=jpeg_data,
+                    image_bytes=trigger_image,
                     diff_ratio=diff_ratio,
                     active_app=app_id,
                     active_title=title,
                 )
             )
 
-    def get_latest_frame(self) -> bytes | None:
-        """Return the most recent frame from memory buffer."""
+    def get_latest_frame(self, prefer_window: bool = True) -> bytes | None:
+        """Return the most recent frame from memory buffer (window crop preferred for OCR/VLM)."""
         if self.frame_buffer:
-            return self.frame_buffer[-1].jpeg_bytes
+            last = self.frame_buffer[-1]
+            if prefer_window and last.window_jpeg_bytes:
+                return last.window_jpeg_bytes
+            return last.jpeg_bytes
         return None

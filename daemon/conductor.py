@@ -19,6 +19,7 @@ from daemon.bus import (
     PlaybackEnded,
     PlaybackStarted,
     ScreenChange,
+    SystemSpeech,
     UserCommand,
     UserSpeech,
     UserSpeechStart,
@@ -102,6 +103,7 @@ class Conductor:
         self.bus.subscribe(UserCommand, self.handle_user_command)
         self.bus.subscribe(UserSpeechStart, self.handle_user_speech_start)
         self.bus.subscribe(UserSpeech, self.handle_user_speech)
+        self.bus.subscribe(SystemSpeech, self.handle_system_speech)
         self.bus.subscribe(ScreenChange, self.handle_screen_change)
 
         # Start initiative evaluation loop
@@ -398,6 +400,60 @@ class Conductor:
             logger.info("[Initiative] Triggering proactive screen reaction for %s", event.active_app)
             await self.process_proactive_turn(seed=f"screen_change:{event.active_app}")
 
+    async def handle_system_speech(self, event: SystemSpeech) -> None:
+        """Handle speech captured from system audio (Discord voice chat, Telegram voice, video)."""
+        logger.info("[SystemAudio] Received system speech event (duration: %.2fs)", event.duration_s)
+        # Skip if conductor is actively listening to user or avatar is speaking/thinking
+        if self.state in ("listening", "speaking", "thinking"):
+            logger.debug("[SystemAudio] Ignored system speech: conductor busy (%s)", self.state)
+            return
+
+        text = event.text
+        if not text and event.audio_data is not None and self.stt:
+            try:
+                text = await asyncio.to_thread(self.stt.transcribe, event.audio_data)
+            except (RuntimeError, ValueError, OSError) as exc:
+                logger.warning("[SystemAudio] Transcription failed: %s", exc)
+                return
+
+        clean_text = text.strip() if text else ""
+        if not clean_text or len(clean_text) < 3:
+            return
+
+        logger.info("[SystemAudio] System voice recognized: '%s'", clean_text)
+
+        now_str = datetime.datetime.now().strftime("%H:%M")
+        active_app = self.vision.active_app if self.vision else "система"
+
+        system_turn_prompt = (
+            f"ТЫ УСЛЫШАЛА ГОЛОС ИЗ СИСТЕМЫ (голосовой чат Discord, голосовое сообщение Telegram, видео или стрим).\n"
+            f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app}.\n"
+            f"Входящая реплика собеседника: «{clean_text}»\n\n"
+            f"ПРАВИЛА РЕАКЦИИ:\n"
+            f"1. Ты можешь вклиниться в разговор и выдать живой комментарий (1-2 предложения с огоньком: подколи, ответь или пошути над собеседником).\n"
+            f"2. Если обращаются к тебе или к Саше — ответь дерзко и естественно.\n"
+            f"3. Если это чужой неинтересный бубнёж, видео или сказать нечего — выведи ТОЛЬКО <silent>.\n"
+            f"4. Обязательно используй теги эмоций (<emo=playful:0.8>, <emo=surprised:0.8>, <emo=curious:0.8>) и жестов."
+        )
+
+        image_base64: str | None = None
+        if self.vision and not self.vision.blind_mode:
+            latest_frame = self.vision.get_latest_frame(prefer_window=True)
+            if latest_frame:
+                image_base64 = base64.b64encode(latest_frame).decode("ascii")
+
+        self._current_gen_task = asyncio.create_task(
+            self._generate_turn(
+                user_text=system_turn_prompt,
+                context_info=None,
+                image_base64=image_base64,
+                vad_stt_ms=0.0,
+                start_ts=time.time(),
+                is_proactive=True,
+            )
+        )
+        await self._current_gen_task
+
     async def process_user_turn(
         self,
         user_text: str,
@@ -601,10 +657,10 @@ class Conductor:
         silence_min = max(0, int((time.time() - self.initiative.last_user_speech_ts) / 60))
         recent_inits = "; ".join(self.initiative.recent_initiatives[-3:]) or "нет"
 
-        # Vision: Attach actual live screen capture for multimodal observation
+        # Vision: Attach actual live screen capture for multimodal observation (prefer sharp window crop)
         image_base64: str | None = None
         if self.vision and not self.vision.blind_mode:
-            latest_frame = self.vision.get_latest_frame()
+            latest_frame = self.vision.get_latest_frame(prefer_window=True)
             if latest_frame:
                 image_base64 = base64.b64encode(latest_frame).decode("ascii")
                 logger.info("[Initiative] Attached live screen frame to proactive observation")
@@ -612,6 +668,10 @@ class Conductor:
         is_coding = any(
             ide in active_app.lower()
             for ide in ("zed", "code", "cursor", "kitty", "terminal", "foot", "alacritty", "neovim", "nvim")
+        )
+        is_chat = any(
+            chat_app in active_app.lower()
+            for chat_app in ("telegram", "discord", "slack", "element", "web", "zen", "browser")
         )
 
         if seed.startswith("coder_done:"):
@@ -638,6 +698,22 @@ class Conductor:
                 f"Пользователь сам знает, что он делает! Реагируй только на саму суть.\n"
                 f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, отдых и режим. НЕ называть по имени.\n"
                 f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если говорить нечего — ТОЛЬКО <silent>."
+            )
+        elif is_chat:
+            proactive_user_prompt = (
+                f"ТЫ СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ: СЕЙЧАС ОТКРЫТ ЧАТ В {active_app} (скриншот окна прикреплен).\n"
+                f"КОНТЕКСТ: время {now_str}, заголовок: {active_app} ({screen_desc}), тишина: {silence_min} мин, "
+                f"твоё настроение: {self.initiative.mood.value}.\n"
+                f"Твои прошлые недавние реплики: [{recent_inits}] (НЕ ПОВТОРЯЙ ИХ).\n\n"
+                f"ПРАВИЛА НАБЛЮДЕНИЯ ЗА ЧАТОМ В РЕАЛЬНОМ ВРЕМЕНИ:\n"
+                f"1. Внимательно прочитай текст последних сообщений в чате на прикреплённом скриншоте.\n"
+                f"2. Сама реши, стоит ли высказаться:\n"
+                f"   - Если в чате обсуждается что-то смешное, абсурдное, интересный вопрос или спор — выдай СТРОГО 1 КОРОТКОЕ ПРЕДЛОЖЕНИЕ (до 10-15 слов): подколи, выскажи своё мнение или пошути.\n"
+                f"   - Если хочешь САМА закинуть сообщение прямо в этот чат — используй тег <cmd=send:текст_сообщения>.\n"
+                f"   - Если там обычная скучная переписка или сказать нечего — выведи ТОЛЬКО <silent>.\n"
+                f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить банальности ('вижу чат', 'ты общаешься'). Реагируй на саму суть и смысл фраз!\n"
+                f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, отдых и режим. НЕ называть по имени.\n"
+                f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=playful:0.8><gst=laugh>). Если повода нет — ТОЛЬКО <silent>."
             )
         else:
             proactive_user_prompt = (

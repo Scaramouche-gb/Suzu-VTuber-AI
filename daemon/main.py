@@ -22,6 +22,7 @@ from daemon.initiative import InitiativeManager
 from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.stt import MockSTT, WhisperSTT
+from daemon.system_audio import SystemAudioInManager
 from daemon.tts import create_tts_engine
 from daemon.vision import VisionManager
 from daemon.ws_server import WebSocketServer, setup_routes
@@ -143,9 +144,10 @@ async def run_server(
     """Run aiohttp application with graceful shutdown and optional CLI loop."""
     app, ws_server = create_app(cfg, bus)
 
-    # Initialize STT, Audio In and Vision
+    # Initialize STT, Audio In, System Audio and Vision
     stt = MockSTT() if dry_run else WhisperSTT(cfg.stt)
     audio_in = AudioInManager(cfg.audio_in, bus)
+    system_audio = SystemAudioInManager(cfg.system_audio, bus)
     vision = VisionManager(cfg.vision, bus)
 
     # Initialize LLM client, TTS engine, memory, initiative and Conductor
@@ -170,6 +172,7 @@ async def run_server(
 
     app["conductor"] = conductor
     app["audio_in"] = audio_in
+    app["system_audio"] = system_audio
     app["vision"] = vision
     app["initiative"] = initiative
     app["memory"] = memory
@@ -186,6 +189,8 @@ async def run_server(
 
     if not no_mic:
         audio_in.start(loop)
+    if cfg.system_audio.enabled:
+        system_audio.start(loop)
     if cfg.vision.enabled:
         vision.start()
 
@@ -245,6 +250,8 @@ async def run_server(
             repl_task.cancel()
         if not no_mic:
             await audio_in.stop()
+        if cfg.system_audio.enabled:
+            await system_audio.stop()
         if cfg.vision.enabled:
             await vision.stop()
         await conductor.close()

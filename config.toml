@@ -52,13 +52,21 @@ f0_up_key = 0
 enabled = true
 output = ""
 interval_s = 1.0
-scale = 0.4
-jpeg_quality = 70
+scale = 0.75
+jpeg_quality = 85
 change_threshold = 0.08
 send_cooldown_s = 25
 max_vlm_calls_per_hour = 60
-blacklist_app_ids = ["org.keepassxc.KeePassXC", "bitwarden", "telegram", "org.telegram.desktop"]
+blacklist_app_ids = ["org.keepassxc.KeePassXC", "bitwarden"]
 blacklist_title_globs = ["*Bank*", "*Банк*", "*пароль*", "*password*"]
+
+[system_audio]
+enabled = true
+sample_rate = 16000
+vad_threshold = 0.50
+min_speech_ms = 350
+end_silence_ms = 750
+
 
 [initiative]
 enabled = true
