@@ -167,7 +167,7 @@ class Conductor:
         elif cmd == "ask":
             text = args.get("text", "")
             if text:
-                await self.bus.publish(UserSpeech(audio_data=b"", text=text))
+                asyncio.create_task(self.bus.publish(UserSpeech(audio_data=b"", text=text)))
 
         elif cmd == "look":
             target = args.get("target", "cursor")
