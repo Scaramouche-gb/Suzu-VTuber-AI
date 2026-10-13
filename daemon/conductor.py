@@ -690,39 +690,16 @@ class Conductor:
             logger.info("[Conductor] Typing command into active terminal: %s", cmd_to_run)
             asyncio.create_task(AppLauncher.type_text(cmd_to_run, press_enter=True))
 
-        # Telegram voice note intent recognition
-        tg_voice_match = re.search(
-            r"\b(?:отправь|запиши|кинь|скинь)\s+(?:в\s+тг|в\s+телегу|в\s+телеграм|собеседнику|ему|ей|в\s+чат)?\s*(?:голосовое|войс|гс)\s*[:,-]?\s*(.+)",
-            user_text,
-            re.IGNORECASE,
-        )
-        if tg_voice_match:
-            voice_txt = tg_voice_match.group(1).strip()
-            logger.info("[Conductor] Direct intent to send Telegram voice note: %s", voice_txt)
-            asyncio.create_task(self._send_tg_voice_task(voice_txt))
-
-        # Telegram round video note intent recognition
-        tg_round_match = re.search(
-            r"\b(?:отправь|запиши|кинь|скинь)\s+(?:в\s+тг|в\s+телегу|в\s+телеграм|собеседнику|ему|ей|в\s+чат)?\s*(?:кружок|кругляш|видеосообщение)\s*[:,-]?\s*(.+)",
-            user_text,
-            re.IGNORECASE,
-        )
-        if tg_round_match:
-            round_txt = tg_round_match.group(1).strip()
-            logger.info("[Conductor] Direct intent to send Telegram round video: %s", round_txt)
-            asyncio.create_task(self._send_tg_round_task(round_txt))
-
-        # Direct text typing into active window / chat intent recognition
+        # Direct text typing into active window intent recognition (explicit: "напечатай: ...")
         type_match = re.search(
-            r"\b(?:напечатай|напиши|введи|отправь)\s+(?:в\s+)?(?:чат[еа]?|окн[ео]|браузер[еа]?|сообщени[ея])\s*[:,-]?\s*(.+)",
+            r"\b(?:напечатай|введи\s+текст)\s*[:,-]?\s*(.+)",
             user_text,
             re.IGNORECASE,
         )
-        if type_match and not tg_voice_match and not tg_round_match:
+        if type_match:
             msg_to_type = type_match.group(1).strip()
-            press_ent = "отправь" in user_text.lower()
             logger.info("[Conductor] Typing text into active chat/window: %s", msg_to_type)
-            asyncio.create_task(AppLauncher.type_text(msg_to_type, press_enter=press_ent))
+            asyncio.create_task(AppLauncher.type_text(msg_to_type, press_enter=False))
 
         # Enter key intent recognition
         if re.search(r"\b(?:нажми\s+(?:энтер|enter|ввод)|отправь\s+текст)\b", user_text, re.IGNORECASE):

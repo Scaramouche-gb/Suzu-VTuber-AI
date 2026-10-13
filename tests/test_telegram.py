@@ -163,41 +163,9 @@ async def test_conductor_telegram_command_tags(bus: EventBus, tg_config: Telegra
     await asyncio.sleep(0.02)
     bridge.send_voice.assert_called()
 
-    await conductor.close()
-
-
-@pytest.mark.asyncio
-async def test_conductor_direct_tg_speech_intents(bus: EventBus, tg_config: TelegramConfig) -> None:
-    """Verify spoken intents like 'запиши голосовое в телеграм' trigger Telegram tasks."""
-    mock_llm = MagicMock()
-    mock_llm.budget.is_exceeded.return_value = False
-    mock_llm.generate_stream = AsyncMock(return_value=iter([]))
-    mock_ws = MagicMock()
-    mock_ws.broadcast = AsyncMock()
-    mock_ws.request_round_recording = AsyncMock(return_value=b"fake_webm")
-    mock_tts = MagicMock()
-    mock_tts.synthesize = AsyncMock(return_value=b"fake_audio")
-
-    bridge = TelegramBridge(tg_config, bus)
-    bridge.send_voice = AsyncMock(return_value=True)
-    bridge.send_round_video = AsyncMock(return_value=True)
-
-    conductor = Conductor(
-        llm=mock_llm,
-        ws_server=mock_ws,
-        bus=bus,
-        tts=mock_tts,
-        telegram=bridge,
-    )
-
-    # Voice intent
-    await conductor.process_user_turn("Сузу, отправь голосовое в телеграм: я уже в пути")
-    await asyncio.sleep(0.05)
-    bridge.send_voice.assert_called()
-
-    # Round video intent
-    await conductor.process_user_turn("Сузу, запиши кружок в телеграм: всем привет")
-    await asyncio.sleep(0.05)
-    bridge.send_round_video.assert_called()
+    # Test tg_round
+    await conductor._handle_tag(CommandTag(action="tg_round:Привет кружком"))
+    await asyncio.sleep(0.02)
+    mock_ws.request_round_recording.assert_called()
 
     await conductor.close()
