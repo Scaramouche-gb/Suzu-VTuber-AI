@@ -242,6 +242,30 @@ class MemoryManager:
         await conn.commit()
         return (cursor.rowcount or 0) > 0
 
+    async def update_user_name_facts(self, new_name: str, old_name: str | None = None) -> None:
+        """Update or replace facts when user corrects their name."""
+        conn = await self._get_conn()
+        clean_name = new_name.strip()
+        if not clean_name:
+            return
+
+        if old_name:
+            await conn.execute(
+                "DELETE FROM facts WHERE text LIKE ? OR text LIKE ?",
+                (f"%{old_name}%", f"%зовут {old_name}%"),
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM facts WHERE text LIKE 'Пользователя зовут %' OR text LIKE 'Имя пользователя %'"
+            )
+
+        await conn.commit()
+        await self.add_fact(
+            f"Пользователя зовут {clean_name}. Никогда не путай его имя и не называй его другими именами!",
+            importance=1.0,
+        )
+        logger.info("[Memory] Updated user name to: %s", clean_name)
+
     async def list_facts(self) -> list[dict[str, Any]]:
         """List all facts as dictionaries for CLI / UI."""
         facts = await self.get_facts(limit=100)
@@ -345,13 +369,14 @@ class MemoryManager:
         existing_facts_str = "; ".join(f.text for f in existing_facts) or "нет"
 
         prompt = (
-            "Проанализируй диалог и выдели новые факты о пользователе, а также составь краткую сводку.\n"
+            "Проанализируй диалог и выдели новые факты о пользователе, исправления старых фактов (если пользователь поправил имя/информацию о себе), а также составь краткую сводку.\n"
             f"Текущие факты: [{existing_facts_str}]\n\n"
             f"Диалог:\n{conversation_text}\n\n"
             "Ответь ТОЛЬКО в формате JSON:\n"
             "{\n"
             '  "summary": "краткая сводка диалога (2-3 предложения)",\n'
-            '  "facts": ["факт 1", "факт 2"]\n'
+            '  "facts": ["новый факт 1", "новый факт 2"],\n'
+            '  "corrections": [{"remove_keyword": "старое ошибочное слово/имя", "new_fact": "новый правильный факт"}]\n'
             "}"
         )
 
@@ -374,6 +399,17 @@ class MemoryManager:
             if summary:
                 await self.add_episode(ts_from, ts_to, summary)
                 logger.info("[Memory] Added episode summary: %s", summary)
+
+            corrections = data.get("corrections", [])
+            for c in corrections:
+                remove_kw = c.get("remove_keyword", "").strip()
+                new_fact = c.get("new_fact", "").strip()
+                if remove_kw:
+                    await conn.execute("DELETE FROM facts WHERE text LIKE ?", (f"%{remove_kw}%",))
+                    await conn.commit()
+                    logger.info("[Memory] Deleted obsolete facts matching: %s", remove_kw)
+                if new_fact:
+                    await self.add_fact(new_fact, importance=1.0)
 
             new_facts = data.get("facts", [])
             for fact_text in new_facts:

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import datetime
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -228,6 +229,21 @@ class Conductor:
         """Handle a complete user message turn with cancellation of stale turns."""
         start_ts = t_start or time.time()
 
+        # On-the-fly user name correction detection
+        if self.memory:
+            name_match = re.search(
+                r"(?:меня зовут|мо[её] имя|я)\s+([А-Яа-яA-Za-z]+)(?:[,\s]+а\s+не\s+([А-Яа-яA-Za-z]+))?",
+                user_text,
+                re.IGNORECASE,
+            )
+            if name_match:
+                detected_name = name_match.group(1).strip()
+                if detected_name.lower() not in (
+                    "думаю", "устал", "спать", "тут", "здесь", "делаю", "просто", "не", "уже", "хочу", "буду"
+                ):
+                    wrong_name = name_match.group(2).strip() if name_match.group(2) else None
+                    asyncio.create_task(self.memory.update_user_name_facts(detected_name, wrong_name))
+
         # Context block from vision
         if context_info is None and self.vision:
             context_info = f"активное окно: {self.vision.active_app} ({self.vision.active_title}); {self.vision.screen_context}"
@@ -285,8 +301,9 @@ class Conductor:
             f"твоё настроение: {self.initiative.mood.value}.\n"
             f"Последние твои реплики: [{recent_inits}] (НЕ ПОВТОРЯЙСЯ).\n"
             f"Тема: {seed}.\n"
-            f"ЗАДАЧА: Сделай живой, забавный, язвительный или заботливый комментарий (1-2 коротких предложения вслух) "
-            f"о том, что Макс сейчас делает за компом (Zed, код, терминал, браузер, ночь), либо подколи или спроси что-то интересное. "
+            f"ЗАДАЧА: Сделай живой, забавный, язвительный или угарный комментарий (1-2 коротких предложения вслух) "
+            f"о том, что происходит за компом (Zed, код, терминал, браузер, ночь), либо подколи или эмоционально отреагируй. "
+            f"НЕ называй собеседника по имени в каждой фразе, говори напрямую. "
             f"Обязательно ставь теги эмоций и жестов в начале (например, <emo=playful:0.9><gst=nod>). Если момент совсем неподходящий, выведи <silent>."
         )
 

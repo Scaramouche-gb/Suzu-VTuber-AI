@@ -61,6 +61,14 @@ async def test_memory_crud_operations(tmp_path) -> None:
     facts_after = await mem.get_facts(limit=10)
     assert len(facts_after) == 0
 
+    # Name correction update
+    await mem.add_fact("Пользователя зовут Макс", importance=1.0)
+    await mem.update_user_name_facts("Саша", old_name="Макс")
+    facts_names = await mem.get_facts(limit=10)
+    assert any("Саша" in f.text for f in facts_names)
+    assert not any("Макс" in f.text for f in facts_names)
+    await mem.delete_fact(facts_names[0].id)
+
     # 3. Episodes
     ep_id = await mem.add_episode(100.0, 200.0, "Обсудили предпочтения в чае.")
     assert ep_id > 0
