@@ -28,6 +28,16 @@ class WebSocketServer:
         self._clients: set[web.WebSocketResponse] = set()
         self.current_state: str = "idle"
 
+    @property
+    def clients(self) -> set[web.WebSocketResponse]:
+        """Set of active connected WebSocket clients."""
+        return self._clients
+
+    @property
+    def client_count(self) -> int:
+        """Number of active connected WebSocket clients."""
+        return len(self._clients)
+
     async def broadcast(self, message: dict[str, Any]) -> None:
         """Broadcast JSON payload to all connected renderers."""
         if not self._clients:

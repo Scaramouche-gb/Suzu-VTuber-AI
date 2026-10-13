@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 import sys
 
-# Allow WebEngine transparency and enable audio autoplay without user gesture
+# Allow WebEngine transparency, prevent NVIDIA/Wayland Vulkan segfault, and enable audio autoplay
 os.environ.setdefault(
     "QTWEBENGINE_CHROMIUM_FLAGS",
-    "--enable-transparent-visuals --disable-gpu-vsync --autoplay-policy=no-user-gesture-required",
+    "--disable-gpu-compositing --disable-features=Vulkan --enable-transparent-visuals --disable-gpu-vsync --autoplay-policy=no-user-gesture-required",
 )
 
 
