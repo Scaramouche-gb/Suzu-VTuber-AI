@@ -89,6 +89,86 @@ ws.on('state', (data) => {
   }
 });
 
+ws.on('record_round', async (data) => {
+  unlockAudio();
+  const recordId = data.id;
+  const audioUrl = data.audio_url;
+  const emotion = data.emotion || 'playful';
+  const gesture = data.gesture || 'wave';
+
+  // Temporarily adjust camera for authentic selfie portrait "кружок" framing
+  avatar.setFit('bust', 1.35, 0.08);
+  avatar.setLookTarget('user');
+  emotions.setEmotion(emotion, 0.9, 0);
+  if (gesture) gestures.playGesture(gesture);
+
+  let stream;
+  try {
+    stream = canvas.captureStream(30);
+  } catch (err) {
+    console.error('Failed to capture canvas stream:', err);
+    return;
+  }
+
+  let mediaRecorder;
+  try {
+    mediaRecorder = new MediaRecorder(stream, {
+      mimeType: MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
+        : 'video/webm',
+      videoBitsPerSecond: 2500000,
+    });
+  } catch (err) {
+    console.error('Failed to init MediaRecorder:', err);
+    return;
+  }
+
+  const chunks = [];
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) chunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    avatar.setFit(fitMode, scale, yOffset); // Restore standard overlay camera framing
+    emotions.setEmotion('neutral', 1.0, 0);
+
+    try {
+      await fetch(`/api/record_round_done?id=${encodeURIComponent(recordId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'video/webm' },
+        body: blob,
+      });
+      console.log('[Recorder] Successfully uploaded round video blob for', recordId);
+    } catch (err) {
+      console.error('[Recorder] Upload failed:', err);
+    }
+  };
+
+  mediaRecorder.start();
+
+  // Play audio through lipsync so mouth and facial expressions sync in real time
+  lipsync.enqueue({
+    id: `round_${recordId}`,
+    audioUrl: audioUrl,
+    emotion: emotion,
+    gesture: gesture,
+  });
+
+  const prevEnded = lipsync.onPlaybackEnded;
+  lipsync.onPlaybackEnded = (endedId, item) => {
+    if (endedId === `round_${recordId}`) {
+      setTimeout(() => {
+        if (mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+      }, 200); // 200ms grace to capture mouth closure
+      lipsync.onPlaybackEnded = prevEnded;
+    }
+    if (prevEnded) prevEnded(endedId, item);
+  };
+});
+
 ws.on('say', (data) => {
   unlockAudio();
   if (data.audio_url) {

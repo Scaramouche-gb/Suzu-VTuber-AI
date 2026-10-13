@@ -93,3 +93,14 @@ model = "models/avatar.vrm"
 fps = 30
 scale = 1.0
 y_offset = 0.0
+
+[telegram]
+enabled = true
+mode = "both"
+bot_token = ""
+default_chat_id = ""
+api_id = 0
+api_hash = ""
+session_name = "suzu_userbot"
+auto_reply = true
+

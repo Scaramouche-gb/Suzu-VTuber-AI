@@ -136,6 +136,17 @@ class AvatarConfig(BaseModel):
     y_offset: float = 0.0
 
 
+class TelegramConfig(BaseModel):
+    enabled: bool = False
+    mode: str = "both"  # "bot", "userbot", "both"
+    bot_token: str = Field(default_factory=lambda: os.getenv("TELEGRAM_BOT_TOKEN", ""))
+    default_chat_id: int | str = Field(default_factory=lambda: os.getenv("TELEGRAM_DEFAULT_CHAT_ID", ""))
+    api_id: int = Field(default_factory=lambda: int(os.getenv("TELEGRAM_API_ID", "0") or "0"))
+    api_hash: str = Field(default_factory=lambda: os.getenv("TELEGRAM_API_HASH", ""))
+    session_name: str = "suzu_userbot"
+    auto_reply: bool = True
+
+
 class Config(BaseModel):
     general: GeneralConfig = Field(default_factory=GeneralConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
@@ -148,6 +159,7 @@ class Config(BaseModel):
     initiative: InitiativeConfig = Field(default_factory=InitiativeConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     avatar: AvatarConfig = Field(default_factory=AvatarConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
 
 
 def load_secrets(secrets_file: Path | None = None) -> None:

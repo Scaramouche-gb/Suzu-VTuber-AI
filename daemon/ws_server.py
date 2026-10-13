@@ -27,6 +27,7 @@ class WebSocketServer:
         self.bus = bus
         self._clients: set[web.WebSocketResponse] = set()
         self.current_state: str = "idle"
+        self._pending_recordings: dict[str, asyncio.Future[bytes]] = {}
 
     @property
     def clients(self) -> set[web.WebSocketResponse]:
@@ -129,10 +130,54 @@ class WebSocketServer:
         else:
             logger.debug("Received unknown message type from renderer: %s", msg_type)
 
+    async def request_round_recording(
+        self,
+        record_id: str,
+        audio_url: str,
+        emotion: str = "playful",
+        gesture: str = "wave",
+        timeout_s: float = 35.0,
+    ) -> bytes:
+        """Instruct connected renderer to record 3D avatar round video with lipsync and return WebM bytes."""
+        if not self._clients:
+            raise RuntimeError("Renderer is not connected via WebSocket")
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[bytes] = loop.create_future()
+        self._pending_recordings[record_id] = fut
+
+        msg = {
+            "type": "record_round",
+            "id": record_id,
+            "audio_url": audio_url,
+            "emotion": emotion,
+            "gesture": gesture,
+        }
+        await self.broadcast(msg)
+
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout_s)
+        except TimeoutError:
+            self._pending_recordings.pop(record_id, None)
+            raise TimeoutError(f"Avatar round video recording timed out after {timeout_s}s") from None
+
     def set_state(self, new_state: str) -> asyncio.Task[None]:
         """Update and broadcast daemon state (idle|listening|thinking|speaking)."""
         self.current_state = new_state
         return asyncio.create_task(self.broadcast({"type": "state", "value": new_state}))
+
+
+async def handle_api_record_round_done(request: web.Request) -> web.Response:
+    """REST endpoint called by renderer with the recorded WebM blob."""
+    record_id = request.query.get("id", "")
+    ws_server: WebSocketServer = request.app["ws_server"]
+    fut = ws_server._pending_recordings.pop(record_id, None)
+    if not fut or fut.done():
+        return web.json_response({"error": "Unknown or completed recording id"}, status=400)
+
+    video_bytes = await request.read()
+    fut.set_result(video_bytes)
+    return web.json_response({"status": "ok", "bytes_received": len(video_bytes)})
 
 
 async def handle_api_status(request: web.Request) -> web.Response:
@@ -231,6 +276,7 @@ def setup_routes(app: web.Application, ws_server: WebSocketServer) -> None:
     # REST Control API
     app.router.add_get("/api/status", handle_api_status)
     app.router.add_post("/api/command", handle_api_command)
+    app.router.add_post("/api/record_round_done", handle_api_record_round_done)
     app.router.add_get("/api/memory", handle_api_memory)
     app.router.add_post("/api/memory/forget", handle_api_memory_forget)
     app.router.add_post("/api/memory/wipe", handle_api_memory_wipe)

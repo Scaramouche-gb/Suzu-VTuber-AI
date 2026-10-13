@@ -89,6 +89,17 @@ class Interrupt(Event):
     reason: str = "barge-in"
 
 
+@dataclass(slots=True)
+class TelegramMessage(Event):
+    """Fired when an incoming Telegram message is received."""
+
+    chat_id: int | str = ""
+    sender_name: str = ""
+    text: str = ""
+    is_voice: bool = False
+    is_video_note: bool = False
+
+
 E = TypeVar("E", bound=Event)
 EventHandler = Callable[[E], Awaitable[None]]
 

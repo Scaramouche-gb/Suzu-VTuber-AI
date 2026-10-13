@@ -20,6 +20,7 @@ from daemon.bus import (
     PlaybackStarted,
     ScreenChange,
     SystemSpeech,
+    TelegramMessage,
     UserCommand,
     UserSpeech,
     UserSpeechStart,
@@ -40,6 +41,7 @@ from daemon.tagparser import (
     TagParser,
     ThoughtTag,
 )
+from daemon.telegram_bridge import TelegramBridge
 from daemon.tencent_bridge import TencentMemoryBridge
 from daemon.tts import BaseTTSEngine, get_audio_path, save_audio_file
 from daemon.ws_server import WebSocketServer
@@ -109,6 +111,7 @@ class Conductor:
         rag: RAGManager | None = None,
         coder: AntigravityBridge | None = None,
         tencent: TencentMemoryBridge | None = None,
+        telegram: TelegramBridge | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
@@ -116,6 +119,7 @@ class Conductor:
         self.tts = tts
         self.stt = stt
         self.vision = vision
+        self.telegram = telegram
         self.initiative = initiative or InitiativeManager()
         self.memory = memory
         self.tencent = tencent or TencentMemoryBridge()
@@ -151,6 +155,7 @@ class Conductor:
         self.bus.subscribe(UserSpeech, self.handle_user_speech)
         self.bus.subscribe(SystemSpeech, self.handle_system_speech)
         self.bus.subscribe(ScreenChange, self.handle_screen_change)
+        self.bus.subscribe(TelegramMessage, self.handle_telegram_message)
 
         # Start initiative evaluation loop
         self._initiative_task = asyncio.create_task(self._initiative_loop())
@@ -509,6 +514,28 @@ class Conductor:
         )
         await self._current_gen_task
 
+    async def handle_telegram_message(self, event: TelegramMessage) -> None:
+        """Handle incoming message received from Telegram."""
+        logger.info(
+            "[Conductor] Telegram message received from %s (%s): %s",
+            event.sender_name,
+            event.chat_id,
+            event.text,
+        )
+        if self.telegram and self.telegram.cfg.auto_reply:
+            media_type = " (голосовое)" if event.is_voice else (" (видеосообщение-кружок)" if event.is_video_note else "")
+            prompt = (
+                f"[ВХОДЯЩЕЕ СООБЩЕНИЕ ИЗ TELEGRAM от {event.sender_name}{media_type}]: «{event.text}».\n"
+                f"Ты можешь ответить собеседнику в Telegram текстом через <cmd=tg_reply:...>, "
+                f"голосовым сообщением через <cmd=tg_voice:...> или кружком с аватаром через <cmd=tg_round:...>, "
+                f"а также озвучить комментарий Саше вслух."
+            )
+            # Only trigger proactive reply if not busy speaking or listening
+            if self.state in ("idle", "listening"):
+                asyncio.create_task(
+                    self.process_user_turn(prompt, context_info=f"[Telegram from {event.sender_name}]")
+                )
+
     async def process_user_turn(
         self,
         user_text: str,
@@ -642,13 +669,35 @@ class Conductor:
             logger.info("[Conductor] Typing command into active terminal: %s", cmd_to_run)
             asyncio.create_task(AppLauncher.type_text(cmd_to_run, press_enter=True))
 
+        # Telegram voice note intent recognition
+        tg_voice_match = re.search(
+            r"\b(?:отправь|запиши|кинь|скинь)\s+(?:в\s+тг|в\s+телегу|в\s+телеграм|собеседнику|ему|ей|в\s+чат)?\s*(?:голосовое|войс|гс)\s*[:,-]?\s*(.+)",
+            user_text,
+            re.IGNORECASE,
+        )
+        if tg_voice_match:
+            voice_txt = tg_voice_match.group(1).strip()
+            logger.info("[Conductor] Direct intent to send Telegram voice note: %s", voice_txt)
+            asyncio.create_task(self._send_tg_voice_task(voice_txt))
+
+        # Telegram round video note intent recognition
+        tg_round_match = re.search(
+            r"\b(?:отправь|запиши|кинь|скинь)\s+(?:в\s+тг|в\s+телегу|в\s+телеграм|собеседнику|ему|ей|в\s+чат)?\s*(?:кружок|кругляш|видеосообщение)\s*[:,-]?\s*(.+)",
+            user_text,
+            re.IGNORECASE,
+        )
+        if tg_round_match:
+            round_txt = tg_round_match.group(1).strip()
+            logger.info("[Conductor] Direct intent to send Telegram round video: %s", round_txt)
+            asyncio.create_task(self._send_tg_round_task(round_txt))
+
         # Direct text typing into active window / chat intent recognition
         type_match = re.search(
             r"\b(?:напечатай|напиши|введи|отправь)\s+(?:в\s+)?(?:чат[еа]?|окн[ео]|браузер[еа]?|сообщени[ея])\s*[:,-]?\s*(.+)",
             user_text,
             re.IGNORECASE,
         )
-        if type_match:
+        if type_match and not tg_voice_match and not tg_round_match:
             msg_to_type = type_match.group(1).strip()
             press_ent = "отправь" in user_text.lower()
             logger.info("[Conductor] Typing text into active chat/window: %s", msg_to_type)
@@ -998,7 +1047,7 @@ class Conductor:
             if self.state == "thinking":
                 self.set_state("idle")
 
-    async def _handle_tag(self, tag: Any, splitter: SentenceSplitter) -> None:
+    async def _handle_tag(self, tag: Any, splitter: SentenceSplitter | None = None) -> None:
         if isinstance(tag, SilentTag):
             logger.info("[Tag] Avatar chose to remain silent (<silent>)")
             return
@@ -1016,17 +1065,20 @@ class Conductor:
                     "intensity": tag.intensity,
                 }
             )
-            splitter.add_tag(tag)
+            if splitter:
+                splitter.add_tag(tag)
 
         elif isinstance(tag, GestureTag):
             logger.debug("[Tag] Gesture: %s", tag.name)
             await self.ws.broadcast({"type": "gesture", "name": tag.name})
-            splitter.add_tag(tag)
+            if splitter:
+                splitter.add_tag(tag)
 
         elif isinstance(tag, LookTag):
             logger.debug("[Tag] Look: %s", tag.target)
             await self.ws.broadcast({"type": "look", "target": tag.target})
-            splitter.add_tag(tag)
+            if splitter:
+                splitter.add_tag(tag)
 
         elif isinstance(tag, CommandTag):
             logger.info("[Tag] Command requested: %s", tag.action)
@@ -1063,6 +1115,24 @@ class Conductor:
                     )
                 )
                 asyncio.create_task(AppLauncher.type_text(text_to_send, press_enter=True))
+            elif tag.action.startswith("tg_voice:"):
+                voice_text = tag.action.split("tg_voice:", 1)[1]
+                asyncio.create_task(self._send_tg_voice_task(voice_text))
+            elif tag.action.startswith("tg_round:"):
+                round_text = tag.action.split("tg_round:", 1)[1]
+                asyncio.create_task(self._send_tg_round_task(round_text))
+            elif tag.action.startswith(("tg_msg:", "tg_reply:", "tg_text:")):
+                tg_text = (
+                    tag.action.split("tg_msg:", 1)[1]
+                    if tag.action.startswith("tg_msg:")
+                    else (
+                        tag.action.split("tg_reply:", 1)[1]
+                        if tag.action.startswith("tg_reply:")
+                        else tag.action.split("tg_text:", 1)[1]
+                    )
+                )
+                if self.telegram:
+                    asyncio.create_task(self.telegram.send_text(tg_text))
             elif tag.action.startswith("term:"):
                 cmd_to_type = tag.action.split("term:", 1)[1]
                 asyncio.create_task(AppLauncher.type_text(cmd_to_type, press_enter=True))
@@ -1279,3 +1349,61 @@ class Conductor:
                 await self.ws.broadcast({"type": "gesture", "name": "wave"})
             elif decision.idle_action == "sigh":
                 await self.ws.broadcast({"type": "emotion", "name": "relaxed", "intensity": 0.6})
+
+    async def _send_tg_voice_task(self, voice_text: str) -> None:
+        """Synthesize and send Telegram Voice Note."""
+        if not self.telegram:
+            logger.warning("Cannot send tg_voice: Telegram bridge is not attached")
+            return
+        if not self.tts:
+            logger.warning("Cannot send tg_voice: TTS engine is not available")
+            return
+
+        logger.info("[Telegram] Synthesizing voice note: '%s'", voice_text)
+        try:
+            audio_bytes = await self.tts.synthesize(voice_text, emotion="happy")
+            if audio_bytes:
+                ok = await self.telegram.send_voice(audio_bytes, caption=voice_text)
+                if ok:
+                    logger.info("[Telegram] Voice note successfully sent!")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[Telegram] Failed sending voice note: %s", exc)
+
+    async def _send_tg_round_task(self, round_text: str) -> None:
+        """Synthesize, record 3D avatar round selfie video and send to Telegram."""
+        if not self.telegram:
+            logger.warning("Cannot send tg_round: Telegram bridge is not attached")
+            return
+        if not self.tts:
+            logger.warning("Cannot send tg_round: TTS engine is not available")
+            return
+
+        logger.info("[Telegram] Recording avatar round video: '%s'", round_text)
+        try:
+            # 1. Synthesize audio
+            audio_bytes = await self.tts.synthesize(round_text, emotion="playful")
+            if not audio_bytes:
+                logger.error("[Telegram] Synthesis failed for round video")
+                return
+
+            # 2. Save temporary audio for renderer streaming
+            record_id = f"rnd_{int(time.time() * 1000)}"
+            save_audio_file(record_id, audio_bytes)
+            audio_url = f"/audio/{record_id}.mp3"
+
+            # 3. Request renderer to record round video with lipsync and expressions
+            video_bytes = await self.ws.request_round_recording(
+                record_id=record_id,
+                audio_url=audio_url,
+                emotion="playful",
+                gesture="wave",
+                timeout_s=35.0,
+            )
+
+            # 4. Transcode and send to Telegram
+            ok = await self.telegram.send_round_video(video_bytes, audio_bytes=audio_bytes)
+            if ok:
+                logger.info("[Telegram] Avatar round video note successfully sent!")
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[Telegram] Failed sending round video note: %s", exc)
+

@@ -24,6 +24,7 @@ from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.stt import MockSTT, WhisperSTT
 from daemon.system_audio import SystemAudioInManager
+from daemon.telegram_bridge import TelegramBridge
 from daemon.tts import cleanup_audio_cache, create_tts_engine
 from daemon.vision import VisionManager
 from daemon.ws_server import WebSocketServer, setup_routes
@@ -160,6 +161,7 @@ async def run_server(
         summarize_every=cfg.memory.summarize_every,
     )
     initiative = InitiativeManager(cfg.initiative)
+    telegram = TelegramBridge(cfg.telegram, bus, vision=vision)
     conductor = Conductor(
         llm=llm,
         ws_server=ws_server,
@@ -169,9 +171,11 @@ async def run_server(
         vision=vision,
         initiative=initiative,
         memory=memory,
+        telegram=telegram,
     )
 
     app["conductor"] = conductor
+    app["telegram"] = telegram
     app["audio_in"] = audio_in
     app["system_audio"] = system_audio
     app["vision"] = vision
@@ -194,6 +198,8 @@ async def run_server(
         system_audio.start(loop)
     if cfg.vision.enabled:
         vision.start()
+    if cfg.telegram.enabled:
+        await telegram.start()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
@@ -318,6 +324,8 @@ async def run_server(
             await system_audio.stop()
         if cfg.vision.enabled:
             await vision.stop()
+        if cfg.telegram.enabled:
+            await telegram.stop()
         await conductor.close()
         logger.info("Shutting down daemon server...")
         await runner.cleanup()
