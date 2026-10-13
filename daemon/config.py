@@ -7,8 +7,9 @@ import os
 import stat
 import tomllib
 from pathlib import Path
+from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +146,21 @@ class TelegramConfig(BaseModel):
     api_hash: str = Field(default_factory=lambda: os.getenv("TELEGRAM_API_HASH", ""))
     session_name: str = "suzu_userbot"
     auto_reply: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_env_fallbacks(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if not data.get("bot_token"):
+                data["bot_token"] = os.getenv("TELEGRAM_BOT_TOKEN", "")
+            if not data.get("default_chat_id"):
+                data["default_chat_id"] = os.getenv("TELEGRAM_DEFAULT_CHAT_ID", "")
+            if not data.get("api_id") or data.get("api_id") == 0:
+                env_api_id = os.getenv("TELEGRAM_API_ID", "0").strip()
+                data["api_id"] = int(env_api_id) if env_api_id.isdigit() else 0
+            if not data.get("api_hash"):
+                data["api_hash"] = os.getenv("TELEGRAM_API_HASH", "")
+        return data
 
 
 class Config(BaseModel):
