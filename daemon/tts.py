@@ -502,11 +502,28 @@ class XTTSEngine(BaseTTSEngine):
         if not clean:
             return b""
 
+        # Base speed from config with emotional modulation
+        base_speed = float(getattr(self.cfg.xtts, "speed", 1.15))
+        emo = (emotion or "neutral").lower()
+        scale = min(1.0, max(0.0, intensity))
+        if emo in ("excited", "surprised", "angry"):
+            effective_speed = base_speed + 0.04 * scale
+        elif emo in ("playful", "silly", "smug"):
+            effective_speed = base_speed + 0.02 * scale
+        elif emo in ("sad", "sorrow", "pout"):
+            effective_speed = max(1.0, base_speed - 0.04 * scale)
+        elif emo == "whisper":
+            effective_speed = max(1.0, base_speed - 0.02 * scale)
+        else:
+            effective_speed = base_speed
+
+        effective_speed = round(min(1.30, max(0.95, effective_speed)), 2)
+
         payload = {
             "text": clean,
             "speaker_wav": self.cfg.xtts.speaker_wav,
             "language": self.cfg.xtts.language,
-            "speed": self.cfg.xtts.speed,
+            "speed": effective_speed,
         }
 
         try:

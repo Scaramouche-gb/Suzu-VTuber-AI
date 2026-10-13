@@ -36,7 +36,7 @@ preroll_ms = 500
 [tts]
 engine = "xtts"
 voice = "ru-RU-SvetlanaNeural"
-rate = "+5%"
+rate = "+12%"
 pitch = "+2Hz"
 pitch_shift = 1.04
 
@@ -45,7 +45,7 @@ enabled = true
 server_url = "http://127.0.0.1:5055/synthesize"
 speaker_wav = "models/xtts/nyamura_speaker.wav"
 language = "ru"
-speed = 1.0
+speed = 1.15
 
 [tts.rvc]
 enabled = false
