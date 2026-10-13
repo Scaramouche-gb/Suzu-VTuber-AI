@@ -16,7 +16,8 @@ def run_overlay(url: str = "http://127.0.0.1:8765/?fit=bust", width: int = 420, 
         sys.exit(1)
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Suzu-VTuber-Overlay")
+    app.setApplicationName("vtuber-overlay")
+    app.setDesktopFileName("vtuber-overlay")
 
     view = QWebEngineView()
     view.setWindowTitle("Suzu VTuber")
