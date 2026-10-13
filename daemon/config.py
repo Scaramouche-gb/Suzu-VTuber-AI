@@ -83,6 +83,14 @@ class RVCConfig(BaseModel):
     f0_up_key: int = 0
 
 
+class XTTSConfig(BaseModel):
+    enabled: bool = True
+    server_url: str = "http://127.0.0.1:5055/synthesize"
+    speaker_wav: str = "models/xtts/speaker.wav"
+    language: str = "ru"
+    speed: float = 1.0
+
+
 class TTSConfig(BaseModel):
     engine: str = "edge"
     voice: str = "ru-RU-SvetlanaNeural"
@@ -90,6 +98,7 @@ class TTSConfig(BaseModel):
     pitch: str = "+2Hz"
     pitch_shift: float = 1.15
     rvc: RVCConfig = Field(default_factory=RVCConfig)
+    xtts: XTTSConfig = Field(default_factory=XTTSConfig)
 
 
 class VisionConfig(BaseModel):

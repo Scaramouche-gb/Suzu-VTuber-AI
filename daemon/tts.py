@@ -464,6 +464,69 @@ class SileroTTSEngine(BaseTTSEngine):
         return b""
 
 
+class XTTSEngine(BaseTTSEngine):
+    """Coqui XTTS-v2 sidecar engine with voice cloning and dynamic acoustic mastering."""
+
+    def __init__(self, cfg: TTSConfig) -> None:
+        self.cfg = cfg
+        self.pronounce = PronunciationDictionary()
+        self.rvc = (
+            RVCVoiceConverter(
+                model_path=cfg.rvc.model_path,
+                index_path=cfg.rvc.index_path,
+                f0_up_key=cfg.rvc.f0_up_key,
+                server_url=cfg.rvc.server_url,
+            )
+            if cfg.rvc.enabled
+            else None
+        )
+
+    async def synthesize(
+        self, text: str, emotion: str = "neutral", intensity: float = 1.0
+    ) -> bytes:
+        clean = self.pronounce.apply(text).strip()
+        if not clean:
+            return b""
+
+        payload = {
+            "text": clean,
+            "speaker_wav": self.cfg.xtts.speaker_wav,
+            "language": self.cfg.xtts.language,
+            "speed": self.cfg.xtts.speed,
+        }
+
+        try:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    self.cfg.xtts.server_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=60.0),
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    logger.error("XTTS server error (%d): %s", resp.status, err_text)
+                    return b""
+                raw_wav = await resp.read()
+
+            if not raw_wav:
+                return b""
+
+            # If RVC is also enabled for timbre matching, pass it through RVC
+            if self.rvc and self.cfg.rvc.enabled:
+                semitones = get_rvc_semitones(self.cfg.rvc.f0_up_key, emotion, intensity)
+                processed_wav = await self.rvc.convert(raw_wav, f0_up_key=semitones)
+                if processed_wav:
+                    raw_wav = processed_wav
+
+            # Apply emotional post-mastering (EQ, presence, dynamics) and encode to MP3
+            return apply_emotion_mastering(raw_wav, emotion, intensity)
+        except (aiohttp.ClientError, TimeoutError, OSError) as exc:
+            logger.error("XTTS synthesis request failed: %s", exc)
+            return b""
+
+
 class MockTTSEngine(BaseTTSEngine):
     """Mock TTS generating tiny synthetic audio frames for testing and dry-run."""
 
@@ -512,6 +575,8 @@ def create_tts_engine(cfg: TTSConfig, dry_run: bool = False) -> BaseTTSEngine:
     """TTS engine factory."""
     if dry_run:
         return MockTTSEngine()
+    if cfg.engine == "xtts":
+        return XTTSEngine(cfg)
     if cfg.engine == "silero":
         return SileroTTSEngine(cfg)
     if cfg.engine == "edge":

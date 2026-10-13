@@ -135,3 +135,20 @@ def test_apply_emotion_mastering_empty() -> None:
 
     assert apply_emotion_mastering(b"", "whisper") == b""
 
+
+@pytest.mark.asyncio
+async def test_xtts_engine_creation_and_fallback() -> None:
+    from daemon.config import XTTSConfig
+    from daemon.tts import XTTSEngine, create_tts_engine
+
+    cfg = TTSConfig(
+        engine="xtts",
+        xtts=XTTSConfig(server_url="http://127.0.0.1:59998/synthesize"),
+    )
+    engine = create_tts_engine(cfg)
+    assert isinstance(engine, XTTSEngine)
+
+    # Calling an unreachable endpoint returns empty bytes gracefully
+    res = await engine.synthesize("Привет, это тестовый голос")
+    assert res == b""
+

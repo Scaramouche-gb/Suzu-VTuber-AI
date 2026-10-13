@@ -235,6 +235,33 @@ async def run_server(
                     "5050",
                 )
 
+    xtts_proc: asyncio.subprocess.Process | None = None
+    if cfg.tts.engine == "xtts":
+        health_url = cfg.tts.xtts.server_url.replace("/synthesize", "/health")
+        is_xtts_healthy = False
+        try:
+            async with aiohttp.ClientSession() as s, s.get(
+                health_url, timeout=aiohttp.ClientTimeout(total=0.8)
+            ) as r:
+                if r.status == 200:
+                    is_xtts_healthy = True
+                    logger.info("XTTS sidecar is ready at %s", cfg.tts.xtts.server_url)
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            is_xtts_healthy = False
+
+        if not is_xtts_healthy:
+            xtts_py = Path("sidecars/xtts/.venv/bin/python")
+            if xtts_py.exists():
+                logger.info("Auto-starting local XTTS sidecar server on port 5055...")
+                xtts_proc = await asyncio.create_subprocess_exec(
+                    str(xtts_py),
+                    "sidecars/xtts/server.py",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "5055",
+                )
+
     repl_task: asyncio.Task[None] | None = None
     if text_mode:
         repl_task = asyncio.create_task(text_repl_loop(conductor, stop_event))
@@ -246,6 +273,8 @@ async def run_server(
             overlay_proc.terminate()
         if rvc_proc and rvc_proc.returncode is None:
             rvc_proc.terminate()
+        if xtts_proc and xtts_proc.returncode is None:
+            xtts_proc.terminate()
         if repl_task and not repl_task.done():
             repl_task.cancel()
         if not no_mic:
