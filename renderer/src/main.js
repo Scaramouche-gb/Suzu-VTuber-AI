@@ -26,12 +26,21 @@ const gestures = new GestureManager();
 const ws = new VTuberWSClient();
 
 // Wire up lipsync callbacks with WS
-lipsync.onPlaybackStarted = (id) => {
+lipsync.onPlaybackStarted = (id, item) => {
   avatar.setState('speaking');
+  if (item && item.emotion) {
+    emotions.setEmotion(item.emotion, 0.9, 0);
+  }
+  if (item && item.gesture) {
+    gestures.playGesture(item.gesture);
+  }
   ws.sendPlaybackStarted(id);
 };
-lipsync.onPlaybackEnded = (id) => {
-  avatar.setState('idle');
+lipsync.onPlaybackEnded = (id, item) => {
+  if (lipsync.queue.length === 0) {
+    avatar.setState('idle');
+    emotions.setEmotion('neutral', 1.0, 0);
+  }
   ws.sendPlaybackEnded(id);
 };
 
@@ -75,17 +84,13 @@ ws.on('state', (data) => {
     avatar.setLookTarget('point', 0.8, 0.1);
   } else if (data.value === 'listening') {
     avatar.setLookTarget('user');
+  } else if (data.value === 'idle') {
+    emotions.setEmotion('neutral', 1.0, 0);
   }
 });
 
 ws.on('say', (data) => {
   unlockAudio();
-  if (data.emotion) {
-    emotions.setEmotion(data.emotion, data.intensity || 0.8, 0);
-  }
-  if (data.gesture) {
-    gestures.playGesture(data.gesture);
-  }
   if (data.audio_url) {
     lipsync.enqueue({
       id: data.id,
@@ -93,6 +98,13 @@ ws.on('say', (data) => {
       emotion: data.emotion,
       gesture: data.gesture,
     });
+  } else {
+    if (data.emotion) {
+      emotions.setEmotion(data.emotion, data.intensity || 0.8, 0);
+    }
+    if (data.gesture) {
+      gestures.playGesture(data.gesture);
+    }
   }
 });
 

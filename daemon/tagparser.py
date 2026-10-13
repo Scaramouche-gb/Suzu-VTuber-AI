@@ -8,7 +8,7 @@ from dataclasses import dataclass
 EMOTION_REGEX = re.compile(r"^emo=([a-zA-Z0-9_-]+)(?::([0-9.]+))?$")
 GESTURE_REGEX = re.compile(r"^gst=([a-zA-Z0-9_-]+)$")
 LOOK_REGEX = re.compile(r"^look=([a-zA-Z0-9_-]+)$")
-CMD_REGEX = re.compile(r"^cmd=([a-zA-Z0-9_:-]+)$")
+CMD_REGEX = re.compile(r"^cmd=(.+)$")
 
 
 @dataclass(slots=True)
@@ -53,7 +53,7 @@ class ParsedToken:
 class TagParser:
     """Stateful streaming tag parser with cross-chunk boundary support."""
 
-    def __init__(self, max_tag_length: int = 40) -> None:
+    def __init__(self, max_tag_length: int = 150) -> None:
         self.max_tag_length = max_tag_length
         self._in_tag = False
         self._tag_buffer: list[str] = []

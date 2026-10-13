@@ -165,3 +165,97 @@ class AppLauncher:
             return True, f"Громкость {delta}"
         except (OSError, RuntimeError) as exc:
             return False, f"Ошибка громкости: {exc}"
+
+    @staticmethod
+    async def type_text(text: str, press_enter: bool = False) -> tuple[bool, str]:
+        """Type text into currently active window via wtype or ydotool with clipboard fallback."""
+        if not text:
+            return False, "Пустой текст для ввода"
+
+        # 1. Native Wayland virtual-keyboard via wtype
+        if shutil.which("wtype"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "wtype",
+                    "-s",
+                    "10",
+                    "--",
+                    text,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                if press_enter:
+                    await asyncio.sleep(0.05)
+                    ret_proc = await asyncio.create_subprocess_exec(
+                        "wtype",
+                        "-k",
+                        "Return",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await ret_proc.wait()
+                return True, f"Напечатала: {text[:30]}"
+            except (OSError, RuntimeError) as exc:
+                logger.warning("[AppLauncher] wtype execution failed: %s", exc)
+
+        # 2. ydotool fallback
+        if shutil.which("ydotool"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ydotool",
+                    "type",
+                    text,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                if press_enter:
+                    await asyncio.sleep(0.05)
+                    ret_proc = await asyncio.create_subprocess_exec(
+                        "ydotool",
+                        "key",
+                        "28:1",
+                        "28:0",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await ret_proc.wait()
+                return True, f"Напечатала через ydotool: {text[:30]}"
+            except (OSError, RuntimeError) as exc:
+                logger.warning("[AppLauncher] ydotool execution failed: %s", exc)
+
+        # 3. wl-copy fallback: copies into Wayland clipboard
+        if shutil.which("wl-copy"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "wl-copy",
+                    "--",
+                    text,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                return True, f"Скопировала в буфер обмена: {text[:30]}"
+            except (OSError, RuntimeError) as exc:
+                logger.warning("[AppLauncher] wl-copy execution failed: %s", exc)
+
+        return False, "Не найден инструмент ввода текста (установи wtype)"
+
+    @staticmethod
+    async def press_key(key: str) -> tuple[bool, str]:
+        """Press a keyboard key (Return, Escape, BackSpace, Tab) via wtype or ydotool."""
+        if shutil.which("wtype"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "wtype",
+                    "-k",
+                    key,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await proc.wait()
+                return True, f"Нажата клавиша {key}"
+            except (OSError, RuntimeError) as exc:
+                return False, f"Ошибка нажатия клавиши {key}: {exc}"
+        return False, "wtype не установлен"

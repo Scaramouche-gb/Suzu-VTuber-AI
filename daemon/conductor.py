@@ -446,6 +446,33 @@ class Conductor:
             _ok, msg = await self.coder.cancel_current_task()
             coder_ctx = f"Результат отмены Антигравити: {msg}"
 
+        # Direct terminal command typing intent recognition
+        term_match = re.search(
+            r"\b(?:напиши|введи|выполни|запусти)\s+(?:в\s+)?(?:терминал[еа]|консол[ие]|команд[уе])\s*[:,-]?\s*(.+)",
+            user_text,
+            re.IGNORECASE,
+        )
+        if term_match:
+            cmd_to_run = term_match.group(1).strip()
+            logger.info("[Conductor] Typing command into active terminal: %s", cmd_to_run)
+            asyncio.create_task(AppLauncher.type_text(cmd_to_run, press_enter=True))
+
+        # Direct text typing into active window / chat intent recognition
+        type_match = re.search(
+            r"\b(?:напечатай|напиши|введи|отправь)\s+(?:в\s+)?(?:чат[еа]?|окн[ео]|браузер[еа]?|сообщени[ея])\s*[:,-]?\s*(.+)",
+            user_text,
+            re.IGNORECASE,
+        )
+        if type_match:
+            msg_to_type = type_match.group(1).strip()
+            press_ent = "отправь" in user_text.lower()
+            logger.info("[Conductor] Typing text into active chat/window: %s", msg_to_type)
+            asyncio.create_task(AppLauncher.type_text(msg_to_type, press_enter=press_ent))
+
+        # Enter key intent recognition
+        if re.search(r"\b(?:нажми\s+(?:энтер|enter|ввод)|отправь\s+текст)\b", user_text, re.IGNORECASE):
+            asyncio.create_task(AppLauncher.press_key("Return"))
+
         if coder_ctx:
             context_info = f"{context_info}; {coder_ctx}" if context_info else coder_ctx
 
@@ -796,6 +823,15 @@ class Conductor:
                 )
             elif tag.action == "code_cancel":
                 asyncio.create_task(self.coder.cancel_current_task())
+            elif tag.action.startswith("type:"):
+                text_to_type = tag.action.split("type:", 1)[1]
+                asyncio.create_task(AppLauncher.type_text(text_to_type, press_enter=False))
+            elif tag.action.startswith("term:"):
+                cmd_to_type = tag.action.split("term:", 1)[1]
+                asyncio.create_task(AppLauncher.type_text(cmd_to_type, press_enter=True))
+            elif tag.action.startswith("key:"):
+                key_to_press = tag.action.split("key:", 1)[1]
+                asyncio.create_task(AppLauncher.press_key(key_to_press))
 
     async def _dispatch_sentence_chunk(
         self,
@@ -859,19 +895,30 @@ class Conductor:
         if audio_url:
             audio_path = get_audio_path(utt_id)
             if audio_path.exists():
-                await self._desktop_audio_queue.put((utt_id, audio_path))
+                await self._desktop_audio_queue.put(
+                    (utt_id, audio_path, primary_emo, intensity, primary_gst)
+                )
 
     async def _desktop_audio_worker(self) -> None:
         """Sequential playback worker ensuring sentences play one by one without overlap."""
         while True:
             try:
-                utt_id, audio_path = await self._desktop_audio_queue.get()
+                utt_id, audio_path, chunk_emo, chunk_intensity, chunk_gst = (
+                    await self._desktop_audio_queue.get()
+                )
             except asyncio.CancelledError:
                 break
 
             try:
                 if audio_path.exists():
                     self.set_state("speaking")
+                    # Dynamically broadcast this specific sentence's emotion and gesture
+                    await self.ws.broadcast(
+                        {"type": "emotion", "name": chunk_emo, "intensity": chunk_intensity}
+                    )
+                    if chunk_gst:
+                        await self.ws.broadcast({"type": "gesture", "name": chunk_gst})
+
                     await self.bus.publish(PlaybackStarted(utterance_id=utt_id))
                     proc = await asyncio.create_subprocess_exec(
                         "mpv",
@@ -894,6 +941,10 @@ class Conductor:
                 self._desktop_audio_queue.task_done()
                 if self._desktop_audio_queue.empty() and self.state == "speaking":
                     self.set_state("idle")
+                    # Automatically reset to neutral expression when speech ends
+                    await self.ws.broadcast(
+                        {"type": "emotion", "name": "neutral", "intensity": 1.0}
+                    )
 
     def _interrupt_desktop_audio(self) -> None:
         """Immediately stop currently playing audio and discard queued sentences."""
@@ -911,6 +962,9 @@ class Conductor:
             self._current_mpv_proc = None
         if self.state == "speaking":
             self.set_state("idle")
+            asyncio.create_task(
+                self.ws.broadcast({"type": "emotion", "name": "neutral", "intensity": 1.0})
+            )
 
     async def _initiative_loop(self) -> None:
         """Periodic background ticker evaluating initiative and idle liveliness."""
