@@ -68,6 +68,10 @@ def test_ctl_argparser() -> None:
     args = parser.parse_args(["show"])
     assert args.command == "show"
 
+    # stop
+    args = parser.parse_args(["stop"])
+    assert args.command == "stop"
+
     # memory
     args = parser.parse_args(["memory", "list"])
     assert args.command == "memory"

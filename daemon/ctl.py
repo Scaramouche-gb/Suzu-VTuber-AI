@@ -123,6 +123,11 @@ def cmd_show(_args: argparse.Namespace) -> None:
     print(f"Avatar visible ({res.get('status')})")
 
 
+def cmd_stop(_args: argparse.Namespace) -> None:
+    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "stop"})
+    print(f"Emergency STOP executed: ({res.get('status')})")
+
+
 def cmd_memory(args: argparse.Namespace) -> None:
     sub = args.subaction.lower()
     if sub == "list":
@@ -212,6 +217,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_show = subparsers.add_parser("show", help="Show avatar window")
     p_show.set_defaults(func=cmd_show)
+
+    # stop
+    p_stop = subparsers.add_parser(
+        "stop", help="Emergency STOP: instantly abort speech, LLM generation, and coding tasks"
+    )
+    p_stop.set_defaults(func=cmd_stop)
 
     # memory
     p_mem = subparsers.add_parser("memory", help="Inspect and manage persistent memory")

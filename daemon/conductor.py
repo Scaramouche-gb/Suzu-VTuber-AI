@@ -160,6 +160,56 @@ class Conductor:
         await self.ws.broadcast({"type": "stop"})
         self.set_state("idle")
 
+    def _is_stop_command(self, text: str) -> bool:
+        """Check if user utterance is an urgent stop / cancel command."""
+        clean = text.strip().lower()
+        clean = re.sub(r"^(?:сузу|сузука|слушай|эй)\s*[,!\.-]?\s*", "", clean).strip()
+        pattern = (
+            r"^(?:быстро\s+)?(?:стоп|стопни|стой|хватит|остановись|останови|прекрати|тормози|заткнись|отмена|отбой)"
+            r"(?:\s+(?:машина|всё|проект|код|кодить|антигравити|подожди|что\s+(?:ты\s+)?делаешь))?[!.]*$"
+        )
+        return bool(re.match(pattern, clean, re.IGNORECASE))
+
+    async def _execute_fast_stop(self) -> str:
+        """Immediately stop any active Antigravity coding task, speech playback, and generation."""
+        logger.info("[Conductor] Fast emergency STOP executed")
+        coder_was_busy = self.coder.is_busy()
+        if coder_was_busy:
+            _ok, msg = await self.coder.cancel_current_task()
+            logger.info("[Conductor] Cancelled Antigravity coding task on STOP: %s", msg)
+
+        # Immediately kill any playing speech in mpv and clear queued audio
+        self._interrupt_desktop_audio()
+
+        # Cancel active LLM generation
+        if self._current_gen_task and not self._current_gen_task.done():
+            self._current_gen_task.cancel()
+            self._current_gen_task = None
+
+        # Reset renderer avatar animation/speech
+        await self.ws.broadcast({"type": "stop"})
+        await self.ws.broadcast({"type": "emotion", "name": "surprised", "intensity": 0.8})
+        await self.ws.broadcast({"type": "gesture", "name": "surprise"})
+        self.set_state("idle")
+
+        if coder_was_busy:
+            reply = "Всё, стопнула задачу в проекте и замерла!"
+        else:
+            reply = "Стопнула, молчу!"
+
+        # Synthesize and speak snappy reply directly (zero LLM wait)
+        chunk = SentenceChunk(text=reply)
+        await self._dispatch_sentence_chunk(chunk, default_emo="surprised", default_intensity=0.8)
+
+        # Update history and memory
+        self.history.append({"role": "user", "content": "Стоп"})
+        self.history.append({"role": "assistant", "content": reply})
+        if self.memory:
+            await self.memory.record_message(role="user", text="Стоп", kind="user")
+            await self.memory.record_message(role="assistant", text=reply, kind="chat")
+
+        return reply
+
     async def handle_playback_started(self, event: PlaybackStarted) -> None:
         self.set_state("speaking")
 
@@ -223,6 +273,9 @@ class Conductor:
                     fact_id = int(args.get("id", 0))
                     await self.memory.delete_fact(fact_id)
 
+        elif cmd == "stop":
+            await self._execute_fast_stop()
+
     async def handle_user_speech_start(self, event: UserSpeechStart) -> None:
         """User started speaking; immediately interrupt active speech and transition to listening."""
         self.initiative.on_user_speech_start()
@@ -281,6 +334,12 @@ class Conductor:
     ) -> None:
         """Handle a complete user message turn with cancellation of stale turns."""
         start_ts = t_start or time.time()
+
+        # Fast Emergency Stop path: immediately abort any coding task, speech, or generation
+        if self._is_stop_command(user_text):
+            logger.info("[Conductor] Fast emergency STOP triggered by: '%s'", user_text)
+            await self._execute_fast_stop()
+            return
 
         # On-the-fly user name correction detection (strict affirmative pattern, ignore questions)
         if self.memory and not re.search(

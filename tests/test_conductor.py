@@ -2,10 +2,12 @@
 
 import asyncio
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from daemon.bus import EventBus, Interrupt
+from daemon.bus import EventBus, Interrupt, UserCommand
+from daemon.coder import AntigravityBridge
 from daemon.conductor import Conductor
 from daemon.config import Config
 from daemon.llm import LLMClient
@@ -89,5 +91,81 @@ async def test_conductor_command_tag() -> None:
     splitter = SentenceSplitter()
     await conductor._handle_tag(CommandTag(action="launch:telegram"), splitter)
     # Shouldn't raise any exception
+    await conductor.close()
+
+
+@pytest.mark.asyncio
+async def test_conductor_is_stop_command() -> None:
+    cfg = Config()
+    bus = EventBus()
+    ws_mock = MockWebSocketServer(cfg, bus)
+    llm = LLMClient(cfg.llm, dry_run=True)
+    conductor = Conductor(llm=llm, ws_server=ws_mock, bus=bus)
+
+    # Positive matches
+    assert conductor._is_stop_command("стоп")
+    assert conductor._is_stop_command("Сузу, стоп!")
+    assert conductor._is_stop_command("стоп машина")
+    assert conductor._is_stop_command("хватит")
+    assert conductor._is_stop_command("остановись")
+    assert conductor._is_stop_command("быстро стоп проект")
+    assert conductor._is_stop_command("стоп код")
+    assert conductor._is_stop_command("стопни")
+    assert conductor._is_stop_command("хватит кодить")
+    assert conductor._is_stop_command("отмена")
+    assert conductor._is_stop_command("отбой")
+
+    # Negative matches (regular queries with conversational words)
+    assert not conductor._is_stop_command("стоп, а как называется функция?")
+    assert not conductor._is_stop_command("что такое стоп-сигнал?")
+    assert not conductor._is_stop_command("привет Сузу")
+
+    await conductor.close()
+
+
+@pytest.mark.asyncio
+async def test_conductor_fast_stop_aborts_active_coder() -> None:
+    cfg = Config()
+    bus = EventBus()
+    ws_mock = MockWebSocketServer(cfg, bus)
+    llm = LLMClient(cfg.llm, dry_run=True)
+    coder_mock = MagicMock(spec=AntigravityBridge)
+    coder_mock.is_busy.return_value = True
+    coder_mock.cancel_current_task = AsyncMock(return_value=(True, "Остановила задачу"))
+
+    conductor = Conductor(llm=llm, ws_server=ws_mock, bus=bus, coder=coder_mock)
+
+    # Trigger fast emergency stop via user turn
+    await conductor.process_user_turn("Сузу, стоп!")
+
+    # Coding task must be canceled immediately
+    coder_mock.cancel_current_task.assert_called_once()
+
+    # WebSocket events must include stop and surprise
+    types = [m["type"] for m in ws_mock.sent_messages]
+    assert "stop" in types
+
+    # Last assistant message should reflect emergency stop
+    assert len(conductor.history) == 2
+    assert "стопнула задачу в проекте" in conductor.history[-1]["content"].lower()
+
+    await conductor.close()
+
+
+@pytest.mark.asyncio
+async def test_conductor_user_command_stop() -> None:
+    cfg = Config()
+    bus = EventBus()
+    ws_mock = MockWebSocketServer(cfg, bus)
+    llm = LLMClient(cfg.llm, dry_run=True)
+    conductor = Conductor(llm=llm, ws_server=ws_mock, bus=bus)
+
+    await conductor.handle_user_command(UserCommand(command="stop"))
+
+    types = [m["type"] for m in ws_mock.sent_messages]
+    assert "stop" in types
+    assert len(conductor.history) == 2
+    assert "стопнула" in conductor.history[-1]["content"].lower()
+
     await conductor.close()
 
