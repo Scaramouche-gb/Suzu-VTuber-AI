@@ -50,6 +50,9 @@ class AudioInManager:
         self._is_speaking_tts = True
 
     async def _on_playback_ended(self, event: PlaybackEnded) -> None:
+        self._preroll_buffer.clear()
+        # Absorb speaker room reverberation and audio driver latency
+        await asyncio.sleep(0.55)
         self._is_speaking_tts = False
 
     def load_vad_model(self) -> Any:

@@ -40,6 +40,14 @@ rate = "+5%"
 pitch = "+2Hz"
 pitch_shift = 1.04
 
+[tts.rvc]
+enabled = false
+mode = "sidecar"
+server_url = "http://127.0.0.1:5050/infer"
+model_path = ""
+index_path = ""
+f0_up_key = 0
+
 [vision]
 enabled = true
 output = ""

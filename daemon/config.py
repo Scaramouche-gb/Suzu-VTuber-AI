@@ -64,12 +64,22 @@ class AudioInConfig(BaseModel):
     preroll_ms: int = 300
 
 
+class RVCConfig(BaseModel):
+    enabled: bool = False
+    mode: str = "sidecar"  # "sidecar" or "onnx"
+    server_url: str = "http://127.0.0.1:5050/infer"
+    model_path: str = ""
+    index_path: str = ""
+    f0_up_key: int = 0
+
+
 class TTSConfig(BaseModel):
     engine: str = "edge"
     voice: str = "ru-RU-SvetlanaNeural"
     rate: str = "+5%"
     pitch: str = "+2Hz"
     pitch_shift: float = 1.15
+    rvc: RVCConfig = Field(default_factory=RVCConfig)
 
 
 class VisionConfig(BaseModel):

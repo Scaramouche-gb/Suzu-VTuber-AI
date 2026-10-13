@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 from daemon.config import TTSConfig
+from daemon.rvc import RVCVoiceConverter
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class EdgeTTSEngine(BaseTTSEngine):
     def __init__(self, cfg: TTSConfig, dict_path: Path | None = None) -> None:
         self.cfg = cfg
         self.pronounce = PronunciationDictionary(dict_path)
+        self.rvc = RVCVoiceConverter(self.cfg.rvc)
         self._silero_fallback: SileroTTSEngine | None = None
 
     def _get_emotion_modulation(self, emotion: str, intensity: float) -> tuple[str, str]:
@@ -123,6 +125,8 @@ class EdgeTTSEngine(BaseTTSEngine):
                     shift = getattr(self.cfg, "pitch_shift", 1.0)
                     if shift != 1.0:
                         audio_data = self._apply_pitch_shift(audio_data, shift)
+                    if self.cfg.rvc.enabled:
+                        audio_data = await self.rvc.convert(audio_data)
                     return audio_data
             except (
                 aiohttp.ClientError,
@@ -174,6 +178,7 @@ class SileroTTSEngine(BaseTTSEngine):
     def __init__(self, cfg: TTSConfig, dict_path: Path | None = None) -> None:
         self.cfg = cfg
         self.pronounce = PronunciationDictionary(dict_path)
+        self.rvc = RVCVoiceConverter(self.cfg.rvc)
         self._model: Any = None
         self._device = torch.device("cpu")
 
@@ -197,9 +202,12 @@ class SileroTTSEngine(BaseTTSEngine):
         if not clean_text:
             return b""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        raw_audio = await loop.run_in_executor(
             None, self._sync_synthesize, clean_text, emotion, intensity
         )
+        if self.cfg.rvc.enabled and raw_audio:
+            return await self.rvc.convert(raw_audio)
+        return raw_audio
 
     def _sync_synthesize(
         self, text: str, emotion: str = "neutral", intensity: float = 1.0
