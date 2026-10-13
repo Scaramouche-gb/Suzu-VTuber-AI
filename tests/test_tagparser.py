@@ -131,3 +131,17 @@ def test_tag_parser_send_command() -> None:
     assert items[0].action == "send:Привет из Telegram! :3"
     assert items[1] == "Готово"
 
+
+def test_tag_parser_erase_and_key_commands() -> None:
+    parser = TagParser()
+    items = parser.feed("<cmd=erase>Стерла!<act=key:space><cmd=key:enter>")
+    assert len(items) == 4
+    assert isinstance(items[0], CommandTag)
+    assert items[0].action == "erase"
+    assert items[1] == "Стерла!"
+    assert isinstance(items[2], CommandTag)
+    assert items[2].action == "key:space"
+    assert isinstance(items[3], CommandTag)
+    assert items[3].action == "key:enter"
+
+

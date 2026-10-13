@@ -7,6 +7,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -251,12 +252,41 @@ class AppLauncher:
             logger.debug("[AppLauncher] Error querying focused app: %s", exc)
         return ""
 
+    _last_typed_length: int = 0
+
+    _KEY_MAP: ClassVar[dict[str, str]] = {
+        "enter": "Return",
+        "return": "Return",
+        "ввод": "Return",
+        "энтер": "Return",
+        "space": "space",
+        "пробел": "space",
+        "backspace": "BackSpace",
+        "стереть": "BackSpace",
+        "удалить": "BackSpace",
+        "бэкспейс": "BackSpace",
+        "escape": "Escape",
+        "esc": "Escape",
+        "эскейп": "Escape",
+        "tab": "Tab",
+        "таб": "Tab",
+        "up": "Up",
+        "вверх": "Up",
+        "down": "Down",
+        "вниз": "Down",
+        "left": "Left",
+        "влево": "Left",
+        "right": "Right",
+        "вправо": "Right",
+    }
+
     @classmethod
     async def type_text(cls, text: str, press_enter: bool = False) -> tuple[bool, str]:
         """Type text into currently active window via layout-independent Wayland paste injection."""
         if not text:
             return False, "Пустой текст для ввода"
 
+        cls._last_typed_length = len(text)
         focused = await cls._get_focused_app()
         is_terminal = any(
             t in focused for t in ("kitty", "terminal", "alacritty", "foot", "xterm", "console")
@@ -397,20 +427,91 @@ class AppLauncher:
 
         return False, "Не найден инструмент ввода текста (установи wtype и wl-clipboard)"
 
-    @staticmethod
-    async def press_key(key: str) -> tuple[bool, str]:
-        """Press a keyboard key (Return, Escape, BackSpace, Tab) via wtype or ydotool."""
+    @classmethod
+    async def press_key(cls, key: str, count: int = 1) -> tuple[bool, str]:
+        """Press a keyboard key (Return, Escape, BackSpace, Tab, space) via wtype or ydotool."""
+        if not key:
+            return False, "Пустая клавиша"
+
+        norm_key = cls._KEY_MAP.get(key.strip().lower(), key.strip())
+        cnt = max(1, min(count, 150))
+
         if shutil.which("wtype"):
             try:
+                cmd = ["wtype"]
+                for _ in range(cnt):
+                    cmd.extend(["-k", norm_key])
                 proc = await asyncio.create_subprocess_exec(
-                    "wtype",
-                    "-k",
-                    key,
+                    *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 await proc.wait()
-                return True, f"Нажата клавиша {key}"
+                desc = f"Нажата клавиша {norm_key}" + (f" x{cnt}" if cnt > 1 else "")
+                return True, desc
             except (OSError, RuntimeError) as exc:
-                return False, f"Ошибка нажатия клавиши {key}: {exc}"
+                return False, f"Ошибка нажатия клавиши {norm_key}: {exc}"
+
         return False, "wtype не установлен"
+
+    @classmethod
+    async def erase_text(cls, count: int = 0) -> tuple[bool, str]:
+        """Erase previously typed text or clear the current active input box.
+
+        - If count > 0: press BackSpace count times.
+        - If count == 0 and _last_typed_length > 0: erase the exact number of characters Suzu typed.
+        - If count < 0 or (count == 0 and _last_typed_length == 0): select all and delete (Ctrl+A + BackSpace).
+        """
+        focused = await cls._get_focused_app()
+        is_terminal = any(
+            t in focused for t in ("kitty", "terminal", "alacritty", "foot", "xterm", "console")
+        )
+
+        target_count = count
+        if target_count == 0 and cls._last_typed_length > 0:
+            target_count = cls._last_typed_length
+            cls._last_typed_length = 0
+
+        if target_count > 0:
+            logger.info("[AppLauncher] Erasing %d characters via BackSpace", target_count)
+            return await cls.press_key("BackSpace", count=target_count)
+
+        # Clear entire input field
+        logger.info("[AppLauncher] Erasing entire input field (Ctrl+A / Ctrl+U)")
+        if shutil.which("wtype"):
+            try:
+                if is_terminal:
+                    # In terminal: Ctrl+U clears line before cursor
+                    clear_proc = await asyncio.create_subprocess_exec(
+                        "wtype",
+                        "-M",
+                        "ctrl",
+                        "-k",
+                        "u",
+                        "-m",
+                        "ctrl",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                else:
+                    # In GUI: Ctrl+A then BackSpace
+                    clear_proc = await asyncio.create_subprocess_exec(
+                        "wtype",
+                        "-M",
+                        "ctrl",
+                        "-k",
+                        "a",
+                        "-m",
+                        "ctrl",
+                        "-k",
+                        "BackSpace",
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                await clear_proc.wait()
+                cls._last_typed_length = 0
+                return True, "Стерла весь текст в строке ввода"
+            except (OSError, RuntimeError) as exc:
+                logger.warning("[AppLauncher] Erase text failed: %s", exc)
+
+        return await cls.press_key("BackSpace", count=1)

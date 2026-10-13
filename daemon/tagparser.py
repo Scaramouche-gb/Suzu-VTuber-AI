@@ -8,7 +8,7 @@ from dataclasses import dataclass
 EMOTION_REGEX = re.compile(r"^emo=([a-zA-Z0-9_-]+)(?::([0-9.]+))?$")
 GESTURE_REGEX = re.compile(r"^gst=([a-zA-Z0-9_-]+)$")
 LOOK_REGEX = re.compile(r"^look=([a-zA-Z0-9_-]+)$")
-CMD_REGEX = re.compile(r"^cmd=(.+)$")
+CMD_REGEX = re.compile(r"^(?:cmd|act)=(.+)$")
 
 
 @dataclass(slots=True)
@@ -202,7 +202,7 @@ class TagParser:
                 prefix, val = raw_action.split(":", 1)
                 prefix_clean = prefix.strip().lower()
                 # Preserve exact case for user text, chat messages, and shell/code commands
-                if prefix_clean in ("type", "term", "code", "send", "msg", "chat"):
+                if prefix_clean in ("type", "term", "code", "send", "msg", "chat", "erase", "backspace", "delete", "key"):
                     return CommandTag(action=f"{prefix_clean}:{val.strip()}")
                 return CommandTag(action=f"{prefix_clean}:{val.strip().lower()}")
             return CommandTag(action=raw_action.lower())

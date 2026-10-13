@@ -36,3 +36,19 @@ async def test_app_launcher_type_text_empty() -> None:
     assert not success
     assert "Пустой текст" in msg
 
+
+def test_app_launcher_key_mapping() -> None:
+    assert AppLauncher._KEY_MAP["enter"] == "Return"
+    assert AppLauncher._KEY_MAP["space"] == "space"
+    assert AppLauncher._KEY_MAP["пробел"] == "space"
+    assert AppLauncher._KEY_MAP["backspace"] == "BackSpace"
+    assert AppLauncher._KEY_MAP["стереть"] == "BackSpace"
+
+
+@pytest.mark.asyncio
+async def test_app_launcher_press_key_empty() -> None:
+    success, msg = await AppLauncher.press_key("")
+    assert not success
+    assert "Пустая клавиша" in msg
+
+

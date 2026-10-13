@@ -705,6 +705,23 @@ class Conductor:
         if re.search(r"\b(?:нажми\s+(?:энтер|enter|ввод)|отправь\s+текст)\b", user_text, re.IGNORECASE):
             asyncio.create_task(AppLauncher.press_key("Return"))
 
+        # Space key intent recognition
+        if re.search(r"\b(?:нажми\s+(?:пробел|space)|поставь\s+пробел)\b", user_text, re.IGNORECASE):
+            asyncio.create_task(AppLauncher.press_key("space"))
+
+        # Erase / BackSpace / Delete intent recognition
+        if re.search(
+            r"\b(?:сотри(?:\s+(?:текст|всё|это|что\s+написала))?|удали(?:\s+(?:текст|всё|это))?|очисти\s+(?:строку|текст|поле)|нажми\s+(?:бэкспейс|backspace))\b",
+            user_text,
+            re.IGNORECASE,
+        ):
+            chars_match = re.search(r"\b(\d+)\s*(?:символ|знак|букв)", user_text, re.IGNORECASE)
+            cnt = int(chars_match.group(1)) if chars_match else 0
+            if "всё" in user_text.lower() or "очисти" in user_text.lower():
+                cnt = -1
+            logger.info("[Conductor] Erasing text on user command (count=%d)", cnt)
+            asyncio.create_task(AppLauncher.erase_text(count=cnt))
+
         if coder_ctx:
             context_info = f"{context_info}; {coder_ctx}" if context_info else coder_ctx
 
@@ -1134,9 +1151,28 @@ class Conductor:
             elif tag.action.startswith("term:"):
                 cmd_to_type = tag.action.split("term:", 1)[1]
                 asyncio.create_task(AppLauncher.type_text(cmd_to_type, press_enter=True))
+            elif tag.action.startswith(("erase", "backspace", "delete")):
+                cnt = 0
+                if ":" in tag.action:
+                    part = tag.action.split(":", 1)[1].strip()
+                    if part.isdigit():
+                        cnt = int(part)
+                    elif part == "all":
+                        cnt = -1
+                asyncio.create_task(AppLauncher.erase_text(count=cnt))
             elif tag.action.startswith("key:"):
-                key_to_press = tag.action.split("key:", 1)[1]
-                asyncio.create_task(AppLauncher.press_key(key_to_press))
+                key_to_press = tag.action.split("key:", 1)[1].strip()
+                cnt = 1
+                if ":" in key_to_press:
+                    k_part, c_part = key_to_press.split(":", 1)
+                    key_to_press = k_part
+                    if c_part.isdigit():
+                        cnt = int(c_part)
+                asyncio.create_task(AppLauncher.press_key(key_to_press, count=cnt))
+            elif tag.action in ("enter", "return"):
+                asyncio.create_task(AppLauncher.press_key("Return"))
+            elif tag.action in ("space", "пробел"):
+                asyncio.create_task(AppLauncher.press_key("space"))
 
     async def _dispatch_sentence_chunk(
         self,
