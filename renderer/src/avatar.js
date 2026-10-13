@@ -41,6 +41,7 @@ export class AvatarController {
     this.scale = 1.0;
     this.yOffset = 0.0;
     this.fitMode = 'bust';
+    this.hasMocapIdle = false;
 
     this.initScene();
     this.initEvents();
@@ -169,14 +170,19 @@ export class AvatarController {
     this.speechVolume = vol;
   }
 
+  setMocapIdleActive(active) {
+    this.hasMocapIdle = Boolean(active);
+  }
+
   preparePose(delta) {
     if (!this.vrm) return;
 
-    if (this.vrm.humanoid) {
-      this.vrm.humanoid.resetNormalizedPose();
+    if (!this.hasMocapIdle) {
+      if (this.vrm.humanoid) {
+        this.vrm.humanoid.resetNormalizedPose();
+      }
+      this.applyIdlePose(delta);
     }
-
-    this.applyIdlePose(delta);
   }
 
   finishFrame(delta) {

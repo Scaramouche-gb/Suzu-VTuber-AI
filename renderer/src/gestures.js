@@ -1,258 +1,277 @@
 /**
- * Lifelike Procedural Gesture & Body Language Engine.
- * Provides organic full-body coordination (spine, chest, head, shoulders, arms, wrists, fingers)
- * with smooth cubic spring envelopes and zero popping.
+ * Lifelike Motion-Capture & VRMA Gesture Engine for Suzu VTuber.
+ * Loads and blends real human motion capture (.bvh) and official Pixiv VRM animations (.vrma)
+ * with smooth cubic cross-fading, idle looping, and seamless fallback.
  */
+
+import * as THREE from 'three';
+import { AnimationLoader } from './animation-loader.js';
+
+export const GESTURE_MAP = {
+  // --- Idles & Stances ---
+  'idle': '/anims/neutral_idle.bvh',
+  'idle2': '/anims/neutral_idle2.bvh',
+  'neutral': '/anims/neutral.bvh',
+  'caring': '/anims/caring.bvh',
+
+  // --- Greetings & Waves ---
+  'wave': '/anims/greeting.vrma',
+  'greeting': '/anims/greeting.vrma',
+  'greeting2': '/anims/greeting2.vrma',
+  'hello': '/anims/hello.vrma',
+  'hi': '/anims/hello.vrma',
+
+  // --- Affirmation & Nodding ---
+  'nod': '/anims/approval.bvh',
+  'approval': '/anims/approval.bvh',
+  'yes': '/anims/approval2.bvh',
+  'agree': '/anims/approval3.bvh',
+
+  // --- Disagreement & Shaking Head ---
+  'shake': '/anims/disapproval.bvh',
+  'disapproval': '/anims/disapproval.bvh',
+  'no': '/anims/disapproval.bvh',
+  'disagree': '/anims/disapproval.bvh',
+
+  // --- Thoughtful & Curious ---
+  'think': '/anims/curiosity.bvh',
+  'thinking': '/anims/curiosity.bvh',
+  'curious': '/anims/curiosity2.bvh',
+  'curiosity': '/anims/curiosity3.bvh',
+
+  // --- Confusion & Shrugging ---
+  'shrug': '/anims/confusion.bvh',
+  'confusion': '/anims/confusion.bvh',
+  'confused': '/anims/confusion2.bvh',
+
+  // --- Amusement & Laughter ---
+  'laugh': '/anims/amusement.bvh',
+  'amusement': '/anims/amusement.bvh',
+  'giggle': '/anims/amusement2.bvh',
+  'chuckle': '/anims/amusement3.bvh',
+
+  // --- Disappointment, Sorrow & Facepalm ---
+  'facepalm': '/anims/disappointment.bvh',
+  'disappointment': '/anims/disappointment.bvh',
+  'sad': '/anims/sadness.bvh',
+  'sadness': '/anims/sadness.bvh',
+  'grief': '/anims/grief.bvh',
+  'remorse': '/anims/remorse.bvh',
+
+  // --- Joy & Excitement ---
+  'joy': '/anims/joy.bvh',
+  'happy': '/anims/joy.bvh',
+  'excited': '/anims/excitement.bvh',
+  'excitement': '/anims/excitement.bvh',
+  'bounce': '/anims/excitement2.bvh',
+  'optimism': '/anims/optimism.bvh',
+
+  // --- Surprise & Shock ---
+  'surprise': '/anims/surprise.bvh',
+  'shock': '/anims/surprise.bvh',
+  'surprised': '/anims/surprise2.bvh',
+
+  // --- Pride & Smugness ---
+  'smug': '/anims/pride.bvh',
+  'pride': '/anims/pride.bvh',
+
+  // --- Cool & Anime Stylized VRMA Animations ---
+  'peace': '/anims/peace_sign.vrma',
+  'peace_sign': '/anims/peace_sign.vrma',
+  'shoot': '/anims/shoot.vrma',
+  'spin': '/anims/spin.vrma',
+  'pose': '/anims/model_pose.vrma',
+  'model_pose': '/anims/model_pose.vrma',
+  'motion_pose': '/anims/motion_pose.vrma',
+  'show_full_body': '/anims/show_full_body.vrma',
+
+  // --- Relief & Emotional Nuances ---
+  'relief': '/anims/relief.bvh',
+  'nervous': '/anims/nervousness.bvh',
+  'embarrassment': '/anims/embarrassment.bvh',
+  'admiration': '/anims/admiration.bvh',
+  'gratitude': '/anims/gratitude.bvh',
+  'love': '/anims/love.bvh',
+
+  // --- Dancing & Energetic Actions ---
+  'dance': '/anims/dance_1.bvh',
+  'dance1': '/anims/dance_1.bvh',
+  'dance2': '/anims/dance_2.bvh',
+  'attention': '/anims/action_attention_seeking.bvh',
+};
 
 export class GestureManager {
   constructor(vrm = null, mixer = null) {
     this.vrm = vrm;
     this.mixer = mixer;
-    this.activeGesture = null;
-    this.gestureTimer = 0.0;
-    this.gestureDuration = 1.0;
-    this.currentBlend = 0.0;
+    this.animLoader = null;
+    this.avatar = null;
+
+    this.idleAction = null;
+    this.currentAction = null;
+    this.isActionPlaying = false;
+    this.activeGestureName = null;
+    this._restoreIdleTimer = null;
+
+    // Procedural fallback
+    this.proceduralGesture = null;
+    this.proceduralTimer = 0.0;
+    this.proceduralDuration = 1.0;
+    this.proceduralBlend = 0.0;
   }
 
-  setVRM(vrm, mixer) {
+  setAvatar(avatar) {
+    this.avatar = avatar;
+  }
+
+  async setVRM(vrm, mixer) {
     this.vrm = vrm;
     this.mixer = mixer;
+
+    if (!this.vrm || !this.mixer) return;
+
+    this.animLoader = new AnimationLoader(vrm);
+
+    // Initialize natural mocap idle
+    await this.initIdle();
+
+    // Preload top conversational gestures in the background
+    this.preloadCommonGestures();
   }
 
-  playGesture(name) {
-    if (!this.vrm) return;
+  async initIdle() {
+    try {
+      const idleClip = await this.animLoader.loadAnimation(GESTURE_MAP['idle']);
+      if (idleClip && this.mixer) {
+        this.idleAction = this.mixer.clipAction(idleClip);
+        this.idleAction.setLoop(THREE.LoopRepeat);
+        this.idleAction.fadeIn(0.5).play();
+
+        if (this.avatar && typeof this.avatar.setMocapIdleActive === 'function') {
+          this.avatar.setMocapIdleActive(true);
+        }
+        console.log('[GestureManager] Lifelike Mocap Idle activated');
+      }
+    } catch (err) {
+      console.warn('[GestureManager] Could not initialize mocap idle, using procedural:', err);
+    }
+  }
+
+  preloadCommonGestures() {
+    const common = ['wave', 'nod', 'shake', 'think', 'shrug', 'laugh', 'peace', 'joy'];
+    for (const key of common) {
+      const url = GESTURE_MAP[key];
+      if (url) {
+        this.animLoader.loadAnimation(url).catch(() => {});
+      }
+    }
+  }
+
+  async playGesture(name) {
+    if (!this.vrm || !this.mixer) return;
+
     const cleanName = (name || '').toLowerCase().trim();
     if (!cleanName) return;
 
-    this.activeGesture = cleanName;
-    this.gestureTimer = 0.0;
+    const animUrl = GESTURE_MAP[cleanName];
 
-    switch (cleanName) {
-      case 'nod':
-        this.gestureDuration = 1.3;
-        break;
-      case 'shake':
-        this.gestureDuration = 1.5;
-        break;
-      case 'think':
-        this.gestureDuration = 2.4;
-        break;
-      case 'shrug':
-        this.gestureDuration = 1.8;
-        break;
-      case 'wave':
-        this.gestureDuration = 2.2;
-        break;
-      case 'laugh':
-        this.gestureDuration = 2.0;
-        break;
-      case 'facepalm':
-        this.gestureDuration = 2.4;
-        break;
-      case 'surprise':
-        this.gestureDuration = 1.3;
-        break;
-      default:
-        this.gestureDuration = 1.2;
+    if (animUrl && this.animLoader) {
+      try {
+        const clip = await this.animLoader.loadAnimation(animUrl);
+        if (clip && this.mixer) {
+          const action = this.mixer.clipAction(clip);
+          action.reset();
+          action.setLoop(THREE.LoopOnce);
+          action.clampWhenFinished = true;
+
+          const prev = this.currentAction || this.idleAction;
+          if (prev && prev !== action) {
+            action.crossFadeFrom(prev, 0.35, true);
+          } else {
+            action.fadeIn(0.35);
+          }
+
+          action.play();
+          this.currentAction = action;
+          this.isActionPlaying = true;
+          this.activeGestureName = cleanName;
+
+          if (this._restoreIdleTimer) {
+            clearTimeout(this._restoreIdleTimer);
+          }
+
+          // Return to idle just before the clip concludes
+          const durationSec = clip.duration;
+          const returnDelayMs = Math.max(800, (durationSec - 0.40) * 1000);
+          this._restoreIdleTimer = setTimeout(() => {
+            this.returnToIdle();
+          }, returnDelayMs);
+
+          console.log(`[GestureManager] Playing mocap gesture '${cleanName}' (${durationSec.toFixed(2)}s)`);
+          return;
+        }
+      } catch (err) {
+        console.warn(`[GestureManager] Error playing mocap gesture '${cleanName}':`, err);
+      }
     }
+
+    // Graceful procedural fallback
+    this.playProcedural(cleanName);
+  }
+
+  returnToIdle() {
+    if (this.currentAction && this.idleAction && this.currentAction !== this.idleAction) {
+      this.idleAction.reset();
+      this.idleAction.crossFadeFrom(this.currentAction, 0.45, true);
+      this.idleAction.play();
+    }
+    this.currentAction = null;
+    this.isActionPlaying = false;
+    this.activeGestureName = null;
+  }
+
+  playProcedural(name) {
+    this.proceduralGesture = name;
+    this.proceduralTimer = 0.0;
+    this.proceduralDuration = 1.4;
   }
 
   update(delta) {
-    if (!this.activeGesture || !this.vrm || !this.vrm.humanoid) {
-      this.currentBlend = Math.max(0.0, this.currentBlend - delta * 6.0);
+    // If procedural fallback is active, update envelope
+    if (!this.proceduralGesture || !this.vrm || !this.vrm.humanoid) {
+      this.proceduralBlend = Math.max(0.0, this.proceduralBlend - delta * 4.0);
       return;
     }
 
-    this.gestureTimer += delta;
-    const progress = Math.min(1.0, this.gestureTimer / this.gestureDuration);
+    this.proceduralTimer += delta;
+    const progress = Math.min(1.0, this.proceduralTimer / this.proceduralDuration);
 
-    // Natural attack, sustain, and decay envelope:
-    // Ease in (0..0.25), sustain peak (0.25..0.75), smooth ease out (0.75..1.0)
     let envelope = 0.0;
     if (progress < 0.25) {
       const t = progress / 0.25;
-      envelope = t * t * (3 - 2 * t); // Smoothstep in
+      envelope = t * t * (3 - 2 * t);
     } else if (progress < 0.75) {
-      envelope = 1.0; // Sustain
+      envelope = 1.0;
     } else {
       const t = (1.0 - progress) / 0.25;
-      envelope = t * t * (3 - 2 * t); // Smoothstep out
+      envelope = t * t * (3 - 2 * t);
     }
-    this.currentBlend = envelope;
+    this.proceduralBlend = envelope;
 
     const humanoid = this.vrm.humanoid;
     const head = humanoid.getNormalizedBoneNode('head');
     const neck = humanoid.getNormalizedBoneNode('neck');
-    const chest = humanoid.getNormalizedBoneNode('chest');
-    const spine = humanoid.getNormalizedBoneNode('spine');
 
-    const leftShoulder = humanoid.getNormalizedBoneNode('leftShoulder');
-    const rightShoulder = humanoid.getNormalizedBoneNode('rightShoulder');
-
-    const leftUpperArm = humanoid.getNormalizedBoneNode('leftUpperArm');
-    const leftLowerArm = humanoid.getNormalizedBoneNode('leftLowerArm');
-    const leftHand = humanoid.getNormalizedBoneNode('leftHand');
-
-    const rightUpperArm = humanoid.getNormalizedBoneNode('rightUpperArm');
-    const rightLowerArm = humanoid.getNormalizedBoneNode('rightLowerArm');
-    const rightHand = humanoid.getNormalizedBoneNode('rightHand');
-
-    // Fingers for natural gesture poses
-    const rIndexProx = humanoid.getNormalizedBoneNode('rightIndexProximal');
-    const rMiddleProx = humanoid.getNormalizedBoneNode('rightMiddleProximal');
-    const rThumbProx = humanoid.getNormalizedBoneNode('rightThumbProximal');
-
-    const lIndexProx = humanoid.getNormalizedBoneNode('leftIndexProximal');
-    const lMiddleProx = humanoid.getNormalizedBoneNode('leftMiddleProximal');
-
-    switch (this.activeGesture) {
-      case 'nod': {
-        // Natural double conversational nod with neck and upper spine follow-through
-        const nodWave = Math.sin(progress * Math.PI * 4);
-        const nodDamp = Math.max(0.0, 1.0 - progress * 0.4);
-        if (head) head.rotation.x += nodWave * 0.12 * envelope * nodDamp;
-        if (neck) neck.rotation.x += nodWave * 0.06 * envelope * nodDamp;
-        if (chest) chest.rotation.x += nodWave * 0.03 * envelope * nodDamp;
-        break;
-      }
-
-      case 'shake': {
-        // Expressive disagreement or banter head shake with playful chin tilt
-        const shakeWave = Math.sin(progress * Math.PI * 5);
-        if (head) {
-          head.rotation.y += shakeWave * 0.14 * envelope;
-          head.rotation.z += Math.cos(progress * Math.PI * 5) * 0.03 * envelope;
-        }
-        if (neck) neck.rotation.y += shakeWave * 0.05 * envelope;
-        break;
-      }
-
-      case 'think': {
-        // Pensive posture: right hand up touching chin, head cocked thoughtfully, gaze up
-        if (head) {
-          head.rotation.z += 0.08 * envelope;
-          head.rotation.x -= 0.05 * envelope;
-          head.rotation.y -= 0.06 * envelope;
-        }
-        if (spine) spine.rotation.y += 0.03 * envelope;
-
-        if (rightShoulder) rightShoulder.rotation.z -= 0.04 * envelope;
-        if (rightUpperArm) {
-          rightUpperArm.rotation.x += 0.45 * envelope;
-          rightUpperArm.rotation.y += 0.35 * envelope;
-          rightUpperArm.rotation.z += 0.90 * envelope;
-        }
-        if (rightLowerArm) {
-          rightLowerArm.rotation.x += 0.30 * envelope;
-          rightLowerArm.rotation.y += 0.45 * envelope;
-          rightLowerArm.rotation.z += 0.75 * envelope;
-        }
-        if (rightHand) {
-          rightHand.rotation.x += 0.15 * envelope;
-          rightHand.rotation.z -= 0.10 * envelope;
-        }
-        if (rIndexProx) rIndexProx.rotation.z -= 0.20 * envelope;
-        break;
-      }
-
-      case 'shrug': {
-        // Both shoulders lift, palms turn out, inquisitive head tilt
-        const shrugLift = 0.14 * envelope;
-        if (leftShoulder) leftShoulder.rotation.z += shrugLift;
-        if (rightShoulder) rightShoulder.rotation.z -= shrugLift;
-
-        if (leftUpperArm) {
-          leftUpperArm.rotation.z -= 0.18 * envelope;
-          leftUpperArm.rotation.x += 0.10 * envelope;
-        }
-        if (rightUpperArm) {
-          rightUpperArm.rotation.z += 0.18 * envelope;
-          rightUpperArm.rotation.x += 0.10 * envelope;
-        }
-
-        if (leftLowerArm) leftLowerArm.rotation.z += 0.25 * envelope;
-        if (rightLowerArm) rightLowerArm.rotation.z -= 0.25 * envelope;
-
-        if (leftHand) leftHand.rotation.z += 0.20 * envelope;
-        if (rightHand) rightHand.rotation.z -= 0.20 * envelope;
-
-        if (head) head.rotation.z += 0.06 * envelope;
-        break;
-      }
-
-      case 'wave': {
-        // Friendly lively hand wave with cheerful wrist rhythm
-        if (rightUpperArm) {
-          rightUpperArm.rotation.x += 0.35 * envelope;
-          rightUpperArm.rotation.y += 0.15 * envelope;
-          rightUpperArm.rotation.z += 1.40 * envelope;
-        }
-        if (rightLowerArm) {
-          rightLowerArm.rotation.x += 0.25 * envelope;
-          rightLowerArm.rotation.y += 0.35 * envelope;
-          rightLowerArm.rotation.z += 0.65 * envelope;
-        }
-        if (rightHand) {
-          const waveRhythm = Math.sin(progress * Math.PI * 9);
-          rightHand.rotation.z += waveRhythm * 0.28 * envelope;
-          rightHand.rotation.x += 0.10 * envelope;
-        }
-        if (head) head.rotation.z -= 0.05 * envelope;
-        break;
-      }
-
-      case 'laugh': {
-        // Laughing giggle: chest bounces, head tilts back then forward in amusement
-        const giggle = Math.sin(progress * Math.PI * 14) * 0.035;
-        if (chest) chest.rotation.x += (-0.03 + giggle) * envelope;
-        if (spine) spine.rotation.x += giggle * 0.5 * envelope;
-        if (head) {
-          head.rotation.x += (-0.07 + giggle * 0.8) * envelope;
-          head.rotation.z += 0.03 * envelope;
-        }
-        if (leftShoulder) leftShoulder.rotation.z += giggle * 0.4 * envelope;
-        if (rightShoulder) rightShoulder.rotation.z -= giggle * 0.4 * envelope;
-        break;
-      }
-
-      case 'facepalm': {
-        // Hand to forehead with slight head shake of exasperation
-        if (head) {
-          head.rotation.x += 0.15 * envelope;
-          head.rotation.z += 0.04 * envelope;
-        }
-        if (chest) chest.rotation.x += 0.04 * envelope;
-
-        if (rightUpperArm) {
-          rightUpperArm.rotation.x += 0.55 * envelope;
-          rightUpperArm.rotation.y += 0.30 * envelope;
-          rightUpperArm.rotation.z += 1.30 * envelope;
-        }
-        if (rightLowerArm) {
-          rightLowerArm.rotation.x += 0.45 * envelope;
-          rightLowerArm.rotation.y += 0.50 * envelope;
-          rightLowerArm.rotation.z += 1.05 * envelope;
-        }
-        if (rightHand) {
-          rightHand.rotation.x += 0.25 * envelope;
-          rightHand.rotation.y += 0.15 * envelope;
-        }
-        break;
-      }
-
-      case 'surprise': {
-        // Surprise reaction: chest lifts, head jerks back slightly, shoulders tense
-        const surprisePulse = Math.sin(progress * Math.PI);
-        if (head) head.rotation.x -= 0.10 * surprisePulse * envelope;
-        if (chest) chest.rotation.x -= 0.05 * surprisePulse * envelope;
-        if (leftShoulder) leftShoulder.rotation.z += 0.10 * surprisePulse * envelope;
-        if (rightShoulder) rightShoulder.rotation.z -= 0.10 * surprisePulse * envelope;
-        break;
-      }
+    if (this.proceduralGesture === 'nod' && head) {
+      const nod = Math.sin(progress * Math.PI * 4) * 0.10 * envelope;
+      head.rotation.x += nod;
+      if (neck) neck.rotation.x += nod * 0.5;
+    } else if (this.proceduralGesture === 'shake' && head) {
+      head.rotation.y += Math.sin(progress * Math.PI * 5) * 0.12 * envelope;
     }
 
     if (progress >= 1.0) {
-      this.activeGesture = null;
+      this.proceduralGesture = null;
     }
   }
 }

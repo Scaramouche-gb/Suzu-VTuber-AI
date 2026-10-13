@@ -216,10 +216,15 @@ async function init() {
     const vrm = await avatar.loadModel(modelUrl);
     emotions.setVRM(vrm);
     lipsync.setVRM(vrm);
-    gestures.setVRM(vrm, avatar.mixer);
+    gestures.setAvatar(avatar);
+    await gestures.setVRM(vrm, avatar.mixer);
+
+    window.avatar = avatar;
+    window.gestures = gestures;
+    window.playGesture = (name) => gestures.playGesture(name);
 
     if (statusEl) statusEl.style.display = 'none';
-    console.log('[VRM] Model loaded successfully');
+    console.log('[VRM] Model and lifelike mocap animation engine loaded successfully');
   } catch (err) {
     console.error('[VRM] Failed to load model:', err);
     if (statusEl) statusEl.textContent = 'Ошибка загрузки: ' + err.message;
