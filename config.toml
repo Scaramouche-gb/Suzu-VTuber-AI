@@ -29,7 +29,7 @@ initial_prompt = "Разговор с подругой по имени Сузу.
 device = ""
 sample_rate = 16000
 vad_threshold = 0.65
-min_speech_ms = 450
+min_speech_ms = 500
 end_silence_ms = 800
 preroll_ms = 350
 

@@ -142,9 +142,10 @@ class AudioInManager:
         is_in_speech = False
         consecutive_speech_frames = 0
         silence_duration_ms = 0.0
+        active_speech_frames = 0
         speech_frames: list[np.ndarray] = []
 
-        consecutive_required = 3
+        consecutive_required = 4
         frame_duration_ms = (FRAME_SIZE / SAMPLE_RATE) * 1000.0  # 32 ms
 
         while self._running:
@@ -157,21 +158,23 @@ class AudioInManager:
             if self.mode == "muted":
                 self._preroll_buffer.clear()
                 is_in_speech = False
+                active_speech_frames = 0
                 continue
 
             if self.mode == "push-to-talk" and not self.ptt_active:
                 self._preroll_buffer.clear()
                 if is_in_speech:
                     # User released PTT, finish phrase
-                    await self._finish_phrase(speech_frames)
+                    await self._finish_phrase(speech_frames, active_speech_frames)
                     speech_frames = []
                     is_in_speech = False
+                    active_speech_frames = 0
                 continue
 
             # Compute threshold (boost during TTS speech for strict echo rejection)
             base_threshold = self.cfg.vad_threshold
             threshold = 0.94 if self._is_speaking_tts else base_threshold
-            required_frames = 4 if self._is_speaking_tts else consecutive_required
+            required_frames = 5 if self._is_speaking_tts else consecutive_required
 
             # Evaluate VAD probability
             tensor_frame = torch.from_numpy(frame)
@@ -196,6 +199,7 @@ class AudioInManager:
                     is_in_speech = True
                     consecutive_speech_frames = 0
                     silence_duration_ms = 0.0
+                    active_speech_frames = required_frames
                     speech_frames = list(self._preroll_buffer)
                     self._preroll_buffer.clear()
 
@@ -209,10 +213,11 @@ class AudioInManager:
             else:
                 speech_frames.append(frame)
 
-                if prob < threshold:
-                    silence_duration_ms += frame_duration_ms
-                else:
+                if prob >= threshold:
+                    active_speech_frames += 1
                     silence_duration_ms = 0.0
+                else:
+                    silence_duration_ms += frame_duration_ms
 
                 current_total_duration_ms = len(speech_frames) * frame_duration_ms
 
@@ -221,12 +226,13 @@ class AudioInManager:
                     silence_duration_ms >= self.cfg.end_silence_ms
                     or current_total_duration_ms >= 30000.0
                 ):
-                    await self._finish_phrase(speech_frames)
+                    await self._finish_phrase(speech_frames, active_speech_frames)
                     speech_frames = []
                     is_in_speech = False
+                    active_speech_frames = 0
                     silence_duration_ms = 0.0
 
-    async def _finish_phrase(self, frames: list[np.ndarray]) -> None:
+    async def _finish_phrase(self, frames: list[np.ndarray], active_frames: int = 0) -> None:
         if not frames:
             return
 
@@ -239,10 +245,26 @@ class AudioInManager:
             logger.debug("VAD: Rejected brief click (%.2fs < %.2fs)", duration_s, min_speech_s)
             return
 
+        # Reject transient noise spikes (fewer than ~224ms of active speech)
+        active_speech_s = (active_frames * FRAME_SIZE) / SAMPLE_RATE
+        if active_speech_s < 0.22:
+            logger.debug(
+                "VAD: Rejected transient noise (active speech %.2fs < 0.22s)", active_speech_s
+            )
+            return
+
+        # Reject isolated sound impulses with low voice energy ratio
+        speech_ratio = active_frames / max(1, len(frames))
+        if speech_ratio < 0.18:
+            logger.debug(
+                "VAD: Rejected low-density noise spike (ratio=%.2f < 0.18)", speech_ratio
+            )
+            return
+
         # Reject quiet ambient room noise / breathing (RMS threshold)
         rms = float(np.sqrt(np.mean(total_audio**2)))
-        if rms < 0.012:
-            logger.debug("VAD: Rejected quiet ambient noise (rms=%.4f < 0.0120)", rms)
+        if rms < 0.013:
+            logger.debug("VAD: Rejected quiet ambient noise (rms=%.4f < 0.0130)", rms)
             return
 
         logger.info("VAD: Captured user phrase (duration: %.2fs, rms: %.4f)", duration_s, rms)

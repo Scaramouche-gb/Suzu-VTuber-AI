@@ -131,14 +131,14 @@ class WhisperSTT:
                 continue
 
             # 1. Metric filtering
-            if segment.no_speech_prob > 0.45:
+            if segment.no_speech_prob > 0.38:
                 logger.debug(
                     "STT: Discarded segment due to no_speech_prob (%.2f): '%s'",
                     segment.no_speech_prob,
                     text,
                 )
                 continue
-            if segment.avg_logprob < -0.95:
+            if segment.avg_logprob < -0.85:
                 logger.debug(
                     "STT: Discarded segment due to low avg_logprob (%.2f): '%s'",
                     segment.avg_logprob,
@@ -166,7 +166,7 @@ class WhisperSTT:
 
             tokens = [t.strip(".,!?-—~ ") for t in clean_lower.split() if t.strip(".,!?-—~ ")]
             if len(tokens) == 1 and tokens[0] in (
-                "да", "а", "о", "э", "угу", "ну", "так", "ага", "и", "что", "хм", "мм", "ок"
+                "да", "а", "о", "э", "угу", "ну", "так", "ага", "и", "что", "хм", "мм", "ок", "ой", "ай", "эх"
             ):
                 logger.debug("STT: Discarded solitary noise token: '%s'", text)
                 continue
@@ -174,7 +174,7 @@ class WhisperSTT:
             valid_texts.append(text)
 
         result_text = " ".join(valid_texts).strip()
-        if not result_text:
+        if not result_text or len(result_text) < 2:
             return ""
 
         # 4. Self-echo rejection
