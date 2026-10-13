@@ -19,19 +19,19 @@ max_usd_per_day = 10.0
 
 [stt]
 engine = "faster-whisper"
-model = "base"
-device = "cpu"
-compute_type = "int8"
+model = "small"
+device = "cuda"
+compute_type = "float16"
 language = "ru"
 initial_prompt = "Разговор с подругой по имени Сузу."
 
 [audio_in]
 device = ""
 sample_rate = 16000
-vad_threshold = 0.65
-min_speech_ms = 450
-end_silence_ms = 450
-preroll_ms = 300
+vad_threshold = 0.50
+min_speech_ms = 350
+end_silence_ms = 700
+preroll_ms = 450
 
 [tts]
 engine = "silero"

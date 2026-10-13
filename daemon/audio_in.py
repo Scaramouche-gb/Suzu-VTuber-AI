@@ -148,7 +148,7 @@ class AudioInManager:
         active_speech_frames = 0
         speech_frames: list[np.ndarray] = []
 
-        consecutive_required = 4
+        consecutive_required = 3
         frame_duration_ms = (FRAME_SIZE / SAMPLE_RATE) * 1000.0  # 32 ms
 
         while self._running:
@@ -180,13 +180,13 @@ class AudioInManager:
             # Compute threshold and required frames (much stricter during TTS speech for barge-in)
             base_threshold = self.cfg.vad_threshold
             if self._is_speaking_tts:
-                threshold = 0.96
-                required_frames = 14  # ~448ms of sustained intentional voice
-                min_rms = 0.022  # Must be audible spoken voice, not quiet keystrokes/creaks
+                threshold = 0.95
+                required_frames = 12  # ~384ms of sustained intentional voice
+                min_rms = 0.018  # Must be audible spoken voice, not quiet keystrokes/creaks
             else:
                 threshold = base_threshold
                 required_frames = consecutive_required
-                min_rms = 0.010
+                min_rms = 0.0035
 
             # Evaluate VAD probability
             tensor_frame = torch.from_numpy(frame)

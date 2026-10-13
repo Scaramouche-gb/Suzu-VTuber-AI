@@ -201,8 +201,8 @@ class TagParser:
             if ":" in raw_action:
                 prefix, val = raw_action.split(":", 1)
                 prefix_clean = prefix.strip().lower()
-                # Preserve exact case for user text and shell/code commands
-                if prefix_clean in ("type", "term", "code"):
+                # Preserve exact case for user text, chat messages, and shell/code commands
+                if prefix_clean in ("type", "term", "code", "send", "msg", "chat"):
                     return CommandTag(action=f"{prefix_clean}:{val.strip()}")
                 return CommandTag(action=f"{prefix_clean}:{val.strip().lower()}")
             return CommandTag(action=raw_action.lower())

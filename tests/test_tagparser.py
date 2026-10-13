@@ -1,6 +1,7 @@
 """Unit tests for streaming TagParser."""
 
 from daemon.tagparser import (
+    CommandTag,
     EmotionTag,
     GestureTag,
     LookTag,
@@ -120,4 +121,13 @@ def test_tag_parser_unclosed_thought_flush() -> None:
     assert len(flushed) == 1
     assert isinstance(flushed[0], ThoughtTag)
     assert flushed[0].content == "Недописанная мысль без закрывающего тега"
+
+
+def test_tag_parser_send_command() -> None:
+    parser = TagParser()
+    items = parser.feed("<cmd=send:Привет из Telegram! :3>Готово")
+    assert len(items) == 2
+    assert isinstance(items[0], CommandTag)
+    assert items[0].action == "send:Привет из Telegram! :3"
+    assert items[1] == "Готово"
 

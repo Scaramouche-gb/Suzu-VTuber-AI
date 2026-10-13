@@ -904,6 +904,17 @@ class Conductor:
             elif tag.action.startswith("type:"):
                 text_to_type = tag.action.split("type:", 1)[1]
                 asyncio.create_task(AppLauncher.type_text(text_to_type, press_enter=False))
+            elif tag.action.startswith(("send:", "msg:", "chat:")):
+                text_to_send = (
+                    tag.action.split("send:", 1)[1]
+                    if tag.action.startswith("send:")
+                    else (
+                        tag.action.split("msg:", 1)[1]
+                        if tag.action.startswith("msg:")
+                        else tag.action.split("chat:", 1)[1]
+                    )
+                )
+                asyncio.create_task(AppLauncher.type_text(text_to_send, press_enter=True))
             elif tag.action.startswith("term:"):
                 cmd_to_type = tag.action.split("term:", 1)[1]
                 asyncio.create_task(AppLauncher.type_text(cmd_to_type, press_enter=True))

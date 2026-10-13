@@ -102,7 +102,8 @@ class WhisperSTT:
                 audio,
                 language=language,
                 vad_filter=False,  # Audio is already pre-filtered by Silero VAD
-                beam_size=1,
+                beam_size=3,
+                temperature=[0.0, 0.2],
                 initial_prompt=self.cfg.initial_prompt,
                 condition_on_previous_text=False,
             )
@@ -118,7 +119,8 @@ class WhisperSTT:
                 audio,
                 language=language,
                 vad_filter=False,
-                beam_size=1,
+                beam_size=3,
+                temperature=[0.0, 0.2],
                 initial_prompt=self.cfg.initial_prompt,
                 condition_on_previous_text=False,
             )
