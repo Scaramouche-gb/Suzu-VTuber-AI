@@ -35,7 +35,7 @@ class AudioInManager:
         self._playback_start_ts = 0.0
         self._running = False
         self._stream: sd.InputStream | None = None
-        self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
+        self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue(maxsize=64)
         self._process_task: asyncio.Task[None] | None = None
 
         # Pre-roll ring buffer: 300ms = ~10 frames of 512 samples
@@ -99,9 +99,21 @@ class AudioInManager:
         ) -> None:
             if status:
                 logger.warning("sounddevice status: %s", status)
-            # Copy float32 audio frame to queue
+            # Copy float32 audio frame to bounded queue, dropping oldest if queue is congested
             frame = indata[:, 0].copy()
-            loop.call_soon_threadsafe(self._queue.put_nowait, frame)
+
+            def _enqueue() -> None:
+                if self._queue.full():
+                    try:
+                        self._queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                try:
+                    self._queue.put_nowait(frame)
+                except asyncio.QueueFull:
+                    pass
+
+            loop.call_soon_threadsafe(_enqueue)
 
         try:
             device = self.cfg.device if self.cfg.device else None

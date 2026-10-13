@@ -897,6 +897,10 @@ class Conductor:
                         )
                         asyncio.create_task(self.memory.maybe_summarize(self.llm))
 
+                # Cap in-memory history to last 24 messages to prevent RAM bloat
+                if len(self.history) > 24:
+                    self.history = self.history[-24:]
+
                 if self.stt:
                     self.stt.set_last_avatar_phrase(reply_str)
 

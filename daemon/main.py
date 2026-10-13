@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gc
 import logging
 import signal
 import sys
@@ -23,7 +24,7 @@ from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.stt import MockSTT, WhisperSTT
 from daemon.system_audio import SystemAudioInManager
-from daemon.tts import create_tts_engine
+from daemon.tts import cleanup_audio_cache, create_tts_engine
 from daemon.vision import VisionManager
 from daemon.ws_server import WebSocketServer, setup_routes
 
@@ -262,6 +263,24 @@ async def run_server(
                     "5055",
                 )
 
+    async def _periodic_cleanup_loop() -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.sleep(300.0)  # Every 5 minutes
+                pruned = cleanup_audio_cache(max_age_s=600.0)
+                collected = gc.collect()
+                logger.debug(
+                    "Periodic cleanup: pruned %d audio files, collected %d GC objects",
+                    pruned,
+                    collected,
+                )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Periodic cleanup error: %s", exc)
+
+    cleanup_task = asyncio.create_task(_periodic_cleanup_loop())
+
     repl_task: asyncio.Task[None] | None = None
     if text_mode:
         repl_task = asyncio.create_task(text_repl_loop(conductor, stop_event))
@@ -269,6 +288,8 @@ async def run_server(
     try:
         await stop_event.wait()
     finally:
+        if cleanup_task and not cleanup_task.done():
+            cleanup_task.cancel()
         if overlay_proc and overlay_proc.returncode is None:
             overlay_proc.terminate()
         if rvc_proc and rvc_proc.returncode is None:

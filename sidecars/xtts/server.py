@@ -6,6 +6,7 @@ Listens on 127.0.0.1:5055 and provides voice generation / cloning using Coqui XT
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import os
 import tempfile
@@ -163,6 +164,10 @@ async def synthesize(req: SynthesizeRequest) -> Response:
     except Exception as exc:  # noqa: BLE001
         logger.error("Synthesis error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+    finally:
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
 
 def main() -> None:

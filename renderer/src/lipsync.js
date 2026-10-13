@@ -111,6 +111,10 @@ export class LipsyncManager {
       }
 
       source.onended = () => {
+        try {
+          source.disconnect();
+          source.buffer = null;
+        } catch {}
         if (this.currentSource === source) {
           this.currentSource = null;
         }
@@ -135,6 +139,8 @@ export class LipsyncManager {
     if (this.currentSource) {
       try {
         this.currentSource.stop();
+        this.currentSource.disconnect();
+        this.currentSource.buffer = null;
       } catch {
         // already stopped
       }

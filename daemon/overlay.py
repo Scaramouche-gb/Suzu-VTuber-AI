@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import sys
 
-# Allow WebEngine transparency, prevent NVIDIA/Wayland Vulkan segfault, and enable audio autoplay
+# Allow WebEngine transparency, prevent NVIDIA/Wayland Vulkan segfault, limit memory heap and enable audio autoplay
 os.environ.setdefault(
     "QTWEBENGINE_CHROMIUM_FLAGS",
-    "--disable-gpu-compositing --disable-features=Vulkan --enable-transparent-visuals --disable-gpu-vsync --autoplay-policy=no-user-gesture-required",
+    "--disable-gpu-compositing --disable-features=Vulkan --enable-transparent-visuals --disable-gpu-vsync "
+    "--autoplay-policy=no-user-gesture-required --js-flags=--max-old-space-size=256 "
+    "--disk-cache-size=10485760 --media-cache-size=10485760",
 )
 
 
