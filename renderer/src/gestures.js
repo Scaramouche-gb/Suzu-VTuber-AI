@@ -100,6 +100,22 @@ export const GESTURE_MAP = {
   'attention': '/anims/action_attention_seeking.bvh',
 };
 
+// Continuous calm idle pool to alternate smoothly while idle
+export const CALM_IDLE_POOL = [
+  '/anims/neutral_idle.bvh',
+  '/anims/neutral_idle2.bvh',
+  '/anims/caring1.bvh',
+  '/anims/neutral2.bvh',
+];
+
+// Gentle ambient micro-fidgets triggered periodically when inactive
+export const CALM_FIDGET_POOL = [
+  '/anims/curiosity2.bvh',
+  '/anims/relief.bvh',
+  '/anims/optimism.bvh',
+  '/anims/admiration3.bvh',
+];
+
 export class GestureManager {
   constructor(vrm = null, mixer = null) {
     this.vrm = vrm;
@@ -113,6 +129,12 @@ export class GestureManager {
     this.activeGestureName = null;
     this._restoreIdleTimer = null;
 
+    // Ambient calm idle cycle
+    this.state = 'idle';
+    this.currentIdleIndex = 0;
+    this.idleTimer = 0.0;
+    this.nextIdleShiftTime = 12.0 + Math.random() * 12.0; // 12-24 seconds
+
     // Procedural fallback
     this.proceduralGesture = null;
     this.proceduralTimer = 0.0;
@@ -122,6 +144,18 @@ export class GestureManager {
 
   setAvatar(avatar) {
     this.avatar = avatar;
+  }
+
+  setState(newState) {
+    const prev = this.state;
+    this.state = newState || 'idle';
+    if (this.state !== 'idle') {
+      this.idleTimer = 0.0;
+      // If an ambient fidget is active when user speaks or system activates, return to base idle
+      if (this.isActionPlaying && this.activeGestureName === 'ambient_fidget') {
+        this.returnToIdle();
+      }
+    }
   }
 
   async setVRM(vrm, mixer) {
@@ -135,13 +169,13 @@ export class GestureManager {
     // Initialize natural mocap idle
     await this.initIdle();
 
-    // Preload top conversational gestures in the background
+    // Preload top conversational gestures and calm idle animations in the background
     this.preloadCommonGestures();
   }
 
   async initIdle() {
     try {
-      const idleClip = await this.animLoader.loadAnimation(GESTURE_MAP['idle']);
+      const idleClip = await this.animLoader.loadAnimation(CALM_IDLE_POOL[0]);
       if (idleClip && this.mixer) {
         this.idleAction = this.mixer.clipAction(idleClip);
         this.idleAction.setLoop(THREE.LoopRepeat);
@@ -163,6 +197,74 @@ export class GestureManager {
       const url = GESTURE_MAP[key];
       if (url) {
         this.animLoader.loadAnimation(url).catch(() => {});
+      }
+    }
+    // Also preload calm idle and fidget pools
+    for (const url of CALM_IDLE_POOL) {
+      this.animLoader.loadAnimation(url).catch(() => {});
+    }
+    for (const url of CALM_FIDGET_POOL) {
+      this.animLoader.loadAnimation(url).catch(() => {});
+    }
+  }
+
+  async triggerAmbientCalmMotion() {
+    if (this.state !== 'idle' || this.isActionPlaying || !this.animLoader || !this.mixer) {
+      return;
+    }
+
+    const roll = Math.random();
+    if (roll < 0.50) {
+      // Smoothly cross-fade to an alternative calm idle posture
+      const nextIndex =
+        (this.currentIdleIndex + 1 + Math.floor(Math.random() * (CALM_IDLE_POOL.length - 1))) %
+        CALM_IDLE_POOL.length;
+      this.currentIdleIndex = nextIndex;
+      const url = CALM_IDLE_POOL[nextIndex];
+
+      const clip = await this.animLoader.loadAnimation(url);
+      if (clip && this.mixer && this.state === 'idle' && !this.isActionPlaying) {
+        const nextAction = this.mixer.clipAction(clip);
+        nextAction.setLoop(THREE.LoopRepeat);
+        nextAction.reset();
+        nextAction.play();
+
+        if (this.idleAction && this.idleAction !== nextAction) {
+          nextAction.crossFadeFrom(this.idleAction, 0.85, true);
+        } else {
+          nextAction.fadeIn(0.85);
+        }
+        this.idleAction = nextAction;
+        console.log(`[GestureManager] Ambient idle stance shifted: ${url.split('/').pop()}`);
+      }
+    } else {
+      // Perform a gentle calm micro-motion (e.g. gentle inquisitive head tilt, soft sigh)
+      const fidgetUrl = CALM_FIDGET_POOL[Math.floor(Math.random() * CALM_FIDGET_POOL.length)];
+      const clip = await this.animLoader.loadAnimation(fidgetUrl);
+      if (clip && this.mixer && this.state === 'idle' && !this.isActionPlaying) {
+        const action = this.mixer.clipAction(clip);
+        action.reset();
+        action.setLoop(THREE.LoopOnce);
+        action.clampWhenFinished = true;
+
+        if (this.idleAction) {
+          action.crossFadeFrom(this.idleAction, 0.55, true);
+        } else {
+          action.fadeIn(0.55);
+        }
+        action.play();
+        this.currentAction = action;
+        this.isActionPlaying = true;
+        this.activeGestureName = 'ambient_fidget';
+
+        if (this._restoreIdleTimer) {
+          clearTimeout(this._restoreIdleTimer);
+        }
+        const delayMs = Math.max(800, (clip.duration - 0.50) * 1000);
+        this._restoreIdleTimer = setTimeout(() => {
+          this.returnToIdle();
+        }, delayMs);
+        console.log(`[GestureManager] Ambient calm micro-motion: ${fidgetUrl.split('/').pop()}`);
       }
     }
   }
@@ -237,6 +339,16 @@ export class GestureManager {
   }
 
   update(delta) {
+    // Ambient calm idle cycle when inactive
+    if (this.state === 'idle' && !this.isActionPlaying && this.idleAction) {
+      this.idleTimer += delta;
+      if (this.idleTimer >= this.nextIdleShiftTime) {
+        this.idleTimer = 0.0;
+        this.nextIdleShiftTime = 12.0 + Math.random() * 12.0;
+        this.triggerAmbientCalmMotion();
+      }
+    }
+
     // If procedural fallback is active, update envelope
     if (!this.proceduralGesture || !this.vrm || !this.vrm.humanoid) {
       this.proceduralBlend = Math.max(0.0, this.proceduralBlend - delta * 4.0);

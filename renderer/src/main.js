@@ -28,6 +28,7 @@ const ws = new VTuberWSClient();
 // Wire up lipsync callbacks with WS
 lipsync.onPlaybackStarted = (id, item) => {
   avatar.setState('speaking');
+  gestures.setState('speaking');
   if (item && item.emotion) {
     emotions.setEmotion(item.emotion, 0.9, 0);
   }
@@ -39,6 +40,7 @@ lipsync.onPlaybackStarted = (id, item) => {
 lipsync.onPlaybackEnded = (id, item) => {
   if (lipsync.queue.length === 0) {
     avatar.setState('idle');
+    gestures.setState('idle');
     emotions.setEmotion('neutral', 1.0, 0);
   }
   ws.sendPlaybackEnded(id);
@@ -80,6 +82,7 @@ canvas.addEventListener('click', (e) => {
 ws.on('state', (data) => {
   console.log('[Daemon State]', data.value);
   avatar.setState(data.value);
+  gestures.setState(data.value);
   if (data.value === 'thinking') {
     avatar.setLookTarget('point', 0.8, 0.1);
   } else if (data.value === 'listening') {
