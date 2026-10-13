@@ -235,6 +235,19 @@ class Conductor:
         logger.debug(
             "Conductor received ScreenChange: %s (%s)", event.active_app, event.active_title
         )
+        now = time.time()
+        # Proactively react to screen changes when idle and user has been quiet for a moment
+        if (
+            self.state == "idle"
+            and (self._current_gen_task is None or self._current_gen_task.done())
+            and not self.initiative.dnd
+            and not self.initiative.muted
+            and not self.initiative.is_in_quiet_hours()
+            and (now - self.initiative.last_user_speech_ts >= 20.0)
+            and (now - self.initiative.last_avatar_speech_ts >= 45.0)
+        ):
+            logger.info("[Initiative] Triggering proactive screen reaction for %s", event.active_app)
+            await self.process_proactive_turn(seed=f"screen_change:{event.active_app}")
 
     async def process_user_turn(
         self,
@@ -329,25 +342,35 @@ class Conductor:
         silence_min = max(0, int((time.time() - self.initiative.last_user_speech_ts) / 60))
         recent_inits = "; ".join(self.initiative.recent_initiatives[-3:]) or "нет"
 
+        # Vision: Attach actual live screen capture for multimodal observation
+        image_base64: str | None = None
+        if self.vision and not self.vision.blind_mode:
+            latest_frame = self.vision.get_latest_frame()
+            if latest_frame:
+                image_base64 = base64.b64encode(latest_frame).decode("ascii")
+                logger.info("[Initiative] Attached live screen frame to proactive observation")
+
         proactive_user_prompt = (
-            f"КОНТЕКСТ: время {now_str}, активное приложение/окно: {active_app}, "
-            f"состояние экрана: {screen_desc}, молчим: {silence_min} мин, "
+            f"ТЫ СЕЙЧАС СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ (скриншот прикреплен к запросу).\n"
+            f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app} ({screen_desc}), молчим: {silence_min} мин, "
             f"твоё настроение: {self.initiative.mood.value}.\n"
-            f"Последние твои реплики: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ СМЫСЛ И СЛОВА).\n"
-            f"Тема: {seed}.\n"
-            f"ЗАДАЧА: Сделай живой, забавный, язвительный или угарный комментарий (1-2 коротких предложения вслух) "
-            f"о коде, окнах, терминале, софте или багах. "
-            f"СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, усталость, отдых, режим ('пора спать', 'иди спать', 'ложись', 'ты не спишь')! Никакого мамочкиного душнилова. "
-            f"НЕ называй собеседника по имени в каждой фразе, говори напрямую. "
-            f"НЕ МАТЕРИСЬ без реального повода (мат допустим крайне редко и только если на экране лютая ошибка или жесть). "
-            f"Обязательно ставь теги эмоций и жестов в начале (например, <emo=playful:0.9><gst=nod>). Если момент совсем неподходящий, выведи <silent>."
+            f"Твои прошлые недавние мысли: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ СМЫСЛ).\n\n"
+            f"ЗАДАЧА:\n"
+            f"1. Внимательно рассмотри прикреплённый скриншот экрана. Что именно сейчас открыто перед пользователем? "
+            f"Какой конкретно код (функции, переменные, логика), текст в консоли/терминале, веб-страница в браузере, ошибка или коммит видны на картинке?\n"
+            f"2. Сделай ОДНО меткое, живое, любопытное или ироничное замечание (1-2 коротких предложения вслух) "
+            f"СТРОГО о конкретной детали или строчке с экрана! (Подметь смешное название, баг в коде, команду, статью или то, что он долго ковыряет).\n"
+            f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить общие шаблонные фразы ('ты в терминале', 'ты на автопилоте', 'что кодишь?', 'ты залипаешь'). Говори только о реальных фактах с экрана!\n"
+            f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, усталость, отдых, режим ('пора спать', 'иди спать', 'ложись'). "
+            f"НЕ называй по имени. НЕ МАТЕРИСЬ без реального повода (мат допустим только если на экране лютая жесть или краш).\n"
+            f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если на экране ничего интересного или всё статично/пусто — выведи только <silent>."
         )
 
         self._current_gen_task = asyncio.create_task(
             self._generate_turn(
                 user_text=proactive_user_prompt,
                 context_info=None,
-                image_base64=None,
+                image_base64=image_base64,
                 vad_stt_ms=0.0,
                 start_ts=time.time(),
                 is_proactive=True,
