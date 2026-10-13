@@ -56,3 +56,11 @@ def test_tag_parser_unclosed_tag_flush() -> None:
     assert items == ["Привет "]
     flushed = parser.flush()
     assert flushed == ["<незакрытый"]
+
+
+def test_tag_parser_command() -> None:
+    parser = TagParser()
+    items = parser.feed("<cmd=launch:telegram>Запускаю телегу!")
+    assert len(items) == 2
+    assert items[0].action == "launch:telegram"
+    assert items[1] == "Запускаю телегу!"

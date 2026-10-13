@@ -8,6 +8,7 @@ from dataclasses import dataclass
 EMOTION_REGEX = re.compile(r"^emo=([a-zA-Z0-9_-]+)(?::([0-9.]+))?$")
 GESTURE_REGEX = re.compile(r"^gst=([a-zA-Z0-9_-]+)$")
 LOOK_REGEX = re.compile(r"^look=([a-zA-Z0-9_-]+)$")
+CMD_REGEX = re.compile(r"^cmd=([a-zA-Z0-9_:-]+)$")
 
 
 @dataclass(slots=True)
@@ -27,11 +28,16 @@ class LookTag:
 
 
 @dataclass(slots=True)
+class CommandTag:
+    action: str
+
+
+@dataclass(slots=True)
 class SilentTag:
     pass
 
 
-TagItem = EmotionTag | GestureTag | LookTag | SilentTag
+TagItem = EmotionTag | GestureTag | LookTag | SilentTag | CommandTag
 
 
 @dataclass(slots=True)
@@ -127,5 +133,9 @@ class TagParser:
         look_match = LOOK_REGEX.match(s)
         if look_match:
             return LookTag(target=look_match.group(1).lower())
+
+        cmd_match = CMD_REGEX.match(s)
+        if cmd_match:
+            return CommandTag(action=cmd_match.group(1).lower())
 
         return None
