@@ -169,3 +169,26 @@ async def test_conductor_user_command_stop() -> None:
 
     await conductor.close()
 
+
+@pytest.mark.asyncio
+async def test_conductor_sentence_capping_dialogue_and_proactive() -> None:
+    cfg = Config()
+    bus = EventBus()
+    ws_mock = MockWebSocketServer(cfg, bus)
+    llm = LLMClient(cfg.llm, dry_run=True)
+    conductor = Conductor(llm=llm, ws_server=ws_mock, bus=bus)
+
+    # In dry-run mode, mock_stream produces multiple sentences.
+    # Regular dialogue turn must cap at 2 sentences max.
+    await conductor.process_user_turn("Сузу, привет!")
+    say_msgs = [m for m in ws_mock.sent_messages if m["type"] == "say"]
+    assert len(say_msgs) <= 2
+
+    # Proactive turn must cap at 1 sentence max.
+    ws_mock.sent_messages.clear()
+    await conductor.process_proactive_turn(seed="geek_curiosity")
+    proactive_say_msgs = [m for m in ws_mock.sent_messages if m["type"] == "say"]
+    assert len(proactive_say_msgs) <= 1
+
+    await conductor.close()
+

@@ -12,7 +12,7 @@ def test_load_config_defaults() -> None:
     assert config.general.name == "Сузу"
     assert config.server.host == "127.0.0.1"
     assert config.server.port == 8765
-    assert config.llm.max_tokens == 300
+    assert config.llm.max_tokens == 120
     assert config.tts.engine in ("edge", "silero")
     assert config.audio_in.sample_rate == 16000
 

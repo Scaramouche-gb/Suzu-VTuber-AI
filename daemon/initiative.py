@@ -231,7 +231,7 @@ class InitiativeManager:
             self.last_app = active_app
             self.ignored_count = 0
             last_comment = self.last_app_comment_ts.get(active_app, 0.0)
-            if (now - last_comment) > 90.0:  # 90s cooldown per app
+            if (now - last_comment) > 240.0:  # 240s cooldown per app
                 self.last_app_comment_ts[active_app] = now
                 seed = "tease_screen"
                 reason = f"app_switch_trigger ({active_app})"

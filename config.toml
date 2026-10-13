@@ -14,7 +14,7 @@ fast_model = "openai/claude-haiku-4-5-20251001"
 fallback_model = "openai/gpt-5.6-luna"
 api_base = "https://codex.sale/v1"
 temperature = 0.8
-max_tokens = 300
+max_tokens = 120
 max_usd_per_day = 10.0
 
 [stt]
@@ -62,11 +62,11 @@ blacklist_title_globs = ["*Bank*", "*Банк*", "*пароль*", "*password*"]
 
 [initiative]
 enabled = true
-mean_interval_s = 40
-min_gap_s = 20
+mean_interval_s = 180
+min_gap_s = 60
 quiet_hours = []
-backoff_factor = 1.2
-max_backoff_s = 150
+backoff_factor = 1.3
+max_backoff_s = 360
 
 [memory]
 db_path = "~/.local/share/vtuber/memory.db"

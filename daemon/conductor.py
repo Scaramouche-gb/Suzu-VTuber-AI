@@ -519,40 +519,37 @@ class Conductor:
                 f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app}.\n\n"
                 f"ЗАДАЧА:\n"
                 f"1. Ты поручала автономному кодинг-агенту Антигравити задачу по коду, и он только что закончил работу!\n"
-                f"2. Сообщи пользователю бодро и живо (1-2 коротких предложения вслух), что Антигравити справился (или завершился с ошибкой), "
-                f"и вкратце передай суть того, что получилось.\n"
+                f"2. Сообщи пользователю бодро и живо (СТРОГО 1 короткое предложение вслух), что Антигравити справился (или выдал ошибку), "
+                f"и в паре слов суть итога.\n"
                 f"3. Используй тег эмоции <emo=happy:0.8> или <emo=surprised:0.8> и жест <gst=nod> или <gst=wave>."
             )
         elif is_coding:
             proactive_user_prompt = (
-                f"ТЫ СЕЙЧАС СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ, ОН ПРЯМО СЕЙЧАС КОДИТ (скриншот прикреплен к запросу).\n"
-                f"КОНТЕКСТ: время {now_str}, редактор/терминал: {active_app} ({screen_desc}), молчим: {silence_min} мин, "
+                f"ТЫ СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ, ОН СЕЙЧАС КОДИТ (скриншот прикреплен).\n"
+                f"КОНТЕКСТ: время {now_str}, редактор/терминал: {active_app} ({screen_desc}), тишина: {silence_min} мин, "
                 f"твоё настроение: {self.initiative.mood.value}.\n"
-                f"Твои прошлые недавние мысли: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ СМЫСЛ).\n\n"
-                f"ЗАДАЧА ПАРНОГО ПРОГРАММИРОВАНИЯ:\n"
-                f"1. Внимательно рассмотри скриншот экрана. Что именно там происходит? "
-                f"Упали тесты (FAILED / pytest)? Ошибка линтера (ruff / syntax error / trace)? Успешный коммит? Название функции или переменной, над которой он завис?\n"
-                f"2. Отреагируй как живой, саркастичный и внимательный напарник по кодингу (1-2 коротких живых предложения вслух): "
-                f"подмети упавший тест, похвали чистый коммит, съязви про название переменной или странный if-else, либо предложи идею.\n"
-                f"3. ЗАПРЕТ: НЕ говорить банальщину ('ты кодишь', 'вижу терминал'). Называй конкретную функцию, тест, команду или строчку с экрана!\n"
-                f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, отдых и режим. НЕ называй по имени. Мат допустим только если на экране лютый краш.\n"
-                f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если всё статично/пусто — выведи только <silent>."
+                f"Твои прошлые недавние реплики: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ И ЭТИ ТЕМЫ).\n\n"
+                f"ПРАВИЛА ПАРНОГО ПРОГРАММИРОВАНИЯ:\n"
+                f"1. Если на экране всё спокойно, пользователь пишет код или нет явного бага — выведи ТОЛЬКО <silent>.\n"
+                f"2. Если заметила реальный упавший тест (FAILED), ошибку линтера или смешной момент в коде — "
+                f"выдай СТРОГО ОДНО КОРОТКОЕ ПРЕДЛОЖЕНИЕ (до 10-12 слов): подколи, заметь баг или подбодри.\n"
+                f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить банальности ('ты в Zed', 'вижу код', 'ты кодишь'). "
+                f"Пользователь сам знает, что он делает! Реагируй только на саму суть.\n"
+                f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, отдых и режим. НЕ называть по имени.\n"
+                f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если говорить нечего — ТОЛЬКО <silent>."
             )
         else:
             proactive_user_prompt = (
-                f"ТЫ СЕЙЧАС СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ (скриншот прикреплен к запросу).\n"
-                f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app} ({screen_desc}), молчим: {silence_min} мин, "
+                f"ТЫ СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ (скриншот прикреплен).\n"
+                f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app} ({screen_desc}), тишина: {silence_min} мин, "
                 f"твоё настроение: {self.initiative.mood.value}.\n"
-                f"Твои прошлые недавние мысли: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ СМЫСЛ).\n\n"
-                f"ЗАДАЧА:\n"
-                f"1. Внимательно рассмотри прикреплённый скриншот экрана. Что именно сейчас открыто перед пользователем? "
-                f"Какой конкретно код (функции, переменные, логика), текст в консоли/терминале, веб-страница в браузере, ошибка или коммит видны на картинке?\n"
-                f"2. Сделай ОДНО меткое, живое, любопытное или ироничное замечание (1-2 коротких предложения вслух) "
-                f"СТРОГО о конкретной детали или строчке с экрана! (Подметь смешное название, баг в коде, команду, статью или то, что он долго ковыряет).\n"
-                f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить общие шаблонные фразы ('ты в терминале', 'ты на автопилоте', 'что кодишь?', 'ты залипаешь'). Говори только о реальных фактах с экрана!\n"
-                f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, усталость, отдых, режим ('пора спать', 'иди спать', 'ложись'). "
-                f"НЕ называй по имени. НЕ МАТЕРИСЬ без реального повода (мат допустим только если на экране лютая жесть или краш).\n"
-                f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если на экране ничего интересного или всё статично/пусто — выведи только <silent>."
+                f"Твои прошлые недавние реплики: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ И ЭТИ ТЕМЫ).\n\n"
+                f"ПРАВИЛА ЖИВОЙ РЕАКЦИИ:\n"
+                f"1. Если на экране ничего нового, статичная страница или нет реального повода сказать — выведи ТОЛЬКО <silent>.\n"
+                f"2. Если есть реальный повод пошутить или заметить свежую деталь — выдай СТРОГО ОДНО КОРОТКОЕ ПРЕДЛОЖЕНИЕ (до 10-12 слов).\n"
+                f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО пересказывать экран ('ты в браузере', 'вижу документ'). Пользователь сам видит свой экран!\n"
+                f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, усталость и режим. НЕ называть по имени. Никакого мата без реального шока.\n"
+                f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если всё статично — ТОЛЬКО <silent>."
             )
 
         self._current_gen_task = asyncio.create_task(
@@ -626,6 +623,7 @@ class Conductor:
         tag_parser = TagParser()
         sentence_splitter = SentenceSplitter()
         full_reply_text: list[str] = []
+        dispatched_texts: list[str] = []
 
         first_token_received = False
         first_audio_dispatched = False
@@ -634,6 +632,11 @@ class Conductor:
 
         active_turn_emo = "neutral"
         active_turn_intensity = 1.0
+
+        max_sentences = 1 if is_proactive else 2
+        if not is_proactive and any(w in user_text.lower() for w in ("подробно", "расскажи", "объясни", "почему")):
+            max_sentences = 4
+        dispatched_sentences_count = 0
 
         try:
             async for token in self.llm.stream_response(messages, model=target_model):
@@ -647,42 +650,55 @@ class Conductor:
                         full_reply_text.append(item)
                         ready_chunks = sentence_splitter.feed(item)
                         for chunk in ready_chunks:
-                            await self._dispatch_sentence_chunk(
-                                chunk,
-                                default_emo=active_turn_emo,
-                                default_intensity=active_turn_intensity,
-                            )
-                            if not first_audio_dispatched:
-                                first_audio_dispatched = True
-                                t_first_audio = time.time()
+                            if dispatched_sentences_count < max_sentences:
+                                dispatched_sentences_count += 1
+                                dispatched_texts.append(chunk.text)
+                                await self._dispatch_sentence_chunk(
+                                    chunk,
+                                    default_emo=active_turn_emo,
+                                    default_intensity=active_turn_intensity,
+                                    )
+                                if not first_audio_dispatched:
+                                    first_audio_dispatched = True
+                                    t_first_audio = time.time()
                     else:
                         if isinstance(item, EmotionTag):
                             active_turn_emo = item.name
                             active_turn_intensity = item.intensity
                         await self._handle_tag(item, sentence_splitter)
 
-            # Flush remaining buffers
-            remaining_tags = tag_parser.flush()
-            for r_tag in remaining_tags:
-                if isinstance(r_tag, str):
-                    full_reply_text.append(r_tag)
-                    ready_chunks = sentence_splitter.feed(r_tag)
-                    for chunk in ready_chunks:
+                if dispatched_sentences_count >= max_sentences:
+                    break
+
+            # Flush remaining buffers if under limit
+            if dispatched_sentences_count < max_sentences:
+                remaining_tags = tag_parser.flush()
+                for r_tag in remaining_tags:
+                    if isinstance(r_tag, str):
+                        full_reply_text.append(r_tag)
+                        ready_chunks = sentence_splitter.feed(r_tag)
+                        for chunk in ready_chunks:
+                            if dispatched_sentences_count < max_sentences:
+                                dispatched_sentences_count += 1
+                                dispatched_texts.append(chunk.text)
+                                await self._dispatch_sentence_chunk(
+                                    chunk,
+                                    default_emo=active_turn_emo,
+                                    default_intensity=active_turn_intensity,
+                                )
+
+                final_chunks = sentence_splitter.flush()
+                for chunk in final_chunks:
+                    if dispatched_sentences_count < max_sentences:
+                        dispatched_sentences_count += 1
+                        dispatched_texts.append(chunk.text)
                         await self._dispatch_sentence_chunk(
                             chunk,
                             default_emo=active_turn_emo,
                             default_intensity=active_turn_intensity,
                         )
 
-            final_chunks = sentence_splitter.flush()
-            for chunk in final_chunks:
-                await self._dispatch_sentence_chunk(
-                    chunk,
-                    default_emo=active_turn_emo,
-                    default_intensity=active_turn_intensity,
-                )
-
-            reply_str = "".join(full_reply_text).strip()
+            reply_str = " ".join(dispatched_texts).strip()
             if reply_str:
                 if is_proactive:
                     self.history.append({"role": "assistant", "content": reply_str})
