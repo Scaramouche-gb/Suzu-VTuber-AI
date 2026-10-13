@@ -123,7 +123,7 @@ def test_build_silero_ssml() -> None:
 
     ssml_whisper = build_silero_ssml("Хе-хе, я шёпотом скажу.", emotion="whisper")
     assert "<speak>" in ssml_whisper
-    assert '<prosody rate="x-slow" pitch="x-low">' in ssml_whisper
+    assert '<prosody rate="medium" pitch="high">' in ssml_whisper
     assert '<break time="110ms"/>' in ssml_whisper
 
     ssml_excited = build_silero_ssml("Ого! Вот это да!", emotion="excited")

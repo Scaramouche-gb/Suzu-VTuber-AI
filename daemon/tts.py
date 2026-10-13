@@ -62,7 +62,7 @@ def get_rvc_semitones(base_f0: int, emotion: str, intensity: float = 1.0) -> int
     if emo in ("playful", "silly", "smug"):
         return base_f0 + round(2 * scale)
     if emo == "whisper":
-        return base_f0 - round(3 * scale)
+        return base_f0 + round(1 * scale)
     if emo in ("sad", "worried", "sorrow"):
         return base_f0 - round(2 * scale)
     if emo in ("angry", "annoyed", "pout"):
@@ -86,7 +86,7 @@ def build_silero_ssml(text: str, emotion: str, intensity: float = 1.0) -> str:
 
     emo = (emotion or "neutral").lower()
     if emo == "whisper":
-        prosody = '<prosody rate="x-slow" pitch="x-low">'
+        prosody = '<prosody rate="medium" pitch="high">'
     elif emo in ("excited", "surprised"):
         prosody = '<prosody rate="fast" pitch="x-high">'
     elif emo in ("happy", "joy", "laugh", "playful", "silly", "smug"):
@@ -113,11 +113,11 @@ def apply_emotion_mastering(
     scale = min(1.0, max(0.0, intensity))
 
     if emo == "whisper":
-        vol = max(0.40, 0.65 - 0.15 * scale)
+        vol = max(0.55, 0.70 - 0.08 * scale)
         af = (
-            "highpass=f=260,"
-            "equalizer=f=350:width_type=h:width=200:g=-4.0,"
-            "treble=g=4.5:f=8000,"
+            "highpass=f=400,"
+            "lowshelf=f=650:g=-7.0,"
+            "treble=g=5.5:f=7500,"
             f"volume={vol:.2f}"
         )
     elif emo in ("excited", "surprised"):
@@ -205,8 +205,8 @@ class EdgeTTSEngine(BaseTTSEngine):
             rate = f"+{int(4 + 3 * scale)}%"
             pitch = f"+{int(2 + 2 * scale)}Hz"
         elif emo == "whisper":
-            rate = f"-{int(6 + 4 * scale)}%"
-            pitch = f"-{int(2 + 2 * scale)}Hz"
+            rate = f"+{int(2 + 2 * scale)}%"
+            pitch = f"+{int(1 + 2 * scale)}Hz"
         elif emo in ("sad", "sorrow", "worried", "pout"):
             rate = f"-{int(5 + 5 * scale)}%"
             pitch = f"-{int(3 + 2 * scale)}Hz"
@@ -363,15 +363,14 @@ class SileroTTSEngine(BaseTTSEngine):
             )
 
             if emo == "whisper":
-                # Intimate close-mic whisper: low volume, airy breath EQ, soft highpass
-                shift = base_shift - 0.08 * scale
-                tempo_factor = 1.0 - 0.08 * scale
-                volume = 0.75
+                # Intimate close-mic whisper: preserve youthful anime pitch, no slow dragging
+                shift = base_shift + 0.02 * scale
+                tempo_factor = 1.02
+                volume = 0.85
                 eq_filter = (
-                    "highpass=f=260,"
-                    "equalizer=f=350:width_type=h:width=120:g=-4.5,"
-                    "equalizer=f=6200:width_type=q:width=1.5:g=4.2,"
-                    "treble=g=3.0:f=8000"
+                    "highpass=f=400,"
+                    "lowshelf=f=650:g=-7.0,"
+                    "treble=g=5.0:f=7500"
                 )
             elif emo in ("excited", "surprised"):
                 # Elevated vocal pitch, high energy, crisp presence
