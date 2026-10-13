@@ -23,15 +23,15 @@ model = "small"
 device = "cuda"
 compute_type = "float16"
 language = "ru"
-initial_prompt = "Разговор с подругой по имени Сузу."
+initial_prompt = "Разговор с Сузу. Слушай, привет! Как дела? Что делаешь? Посмотри код, экран, проект, чат."
 
 [audio_in]
 device = ""
 sample_rate = 16000
-vad_threshold = 0.50
-min_speech_ms = 350
-end_silence_ms = 700
-preroll_ms = 450
+vad_threshold = 0.38
+min_speech_ms = 220
+end_silence_ms = 850
+preroll_ms = 500
 
 [tts]
 engine = "xtts"

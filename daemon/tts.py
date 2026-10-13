@@ -27,6 +27,19 @@ DEFAULT_PRONOUNCE_PATH = Path("pronounce.toml")
 AUDIO_CACHE_DIR = Path.home() / ".cache" / "vtuber" / "audio"
 
 
+def clean_laughter_text(text: str) -> str:
+    """Strip unintelligible textual laughter tokens ('ха-ха', 'хе-хе', 'хи-хи', etc.) before TTS."""
+    pattern = (
+        r"\b(?:[хx][аaеeиy]-?){2,}\b|"
+        r"\b(?:ха-ха|хе-хе|хи-хи|хаха|хехе|хихи|ахах|ахаха|ха-а|хе-е|хех|хах)\b"
+    )
+    cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"^[,\s!?-]+", "", cleaned).strip()
+    cleaned = re.sub(r"\s+([,!?.-])", r"\1", cleaned)
+    return cleaned
+
+
 class PronunciationDictionary:
     """Preprocesses text using word boundary replacements from pronounce.toml."""
 
@@ -46,9 +59,10 @@ class PronunciationDictionary:
                 logger.warning("Failed to load pronunciation dictionary %s: %s", path, exc)
 
     def apply(self, text: str) -> str:
+        text = clean_laughter_text(text)
         for pattern, replacement in self.replacements:
             text = pattern.sub(replacement, text)
-        return text
+        return clean_laughter_text(text)
 
 
 def get_rvc_semitones(base_f0: int, emotion: str, intensity: float = 1.0) -> int:

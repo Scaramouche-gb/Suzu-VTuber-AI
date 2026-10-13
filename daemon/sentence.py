@@ -151,7 +151,16 @@ class SentenceSplitter:
         return -1
 
     def _create_chunk(self, text: str) -> SentenceChunk:
+        pattern = (
+            r"\b(?:[хx][аaеeиy]-?){2,}\b|"
+            r"\b(?:ха-ха|хе-хе|хи-хи|хаха|хехе|хихи|ахах|ахаха|ха-а|хе-е|хех|хах)\b"
+        )
+        cleaned = re.sub(pattern, "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        cleaned = re.sub(r"^[,\s!?-]+", "", cleaned).strip()
+        cleaned = re.sub(r"\s+([,!?.-])", r"\1", cleaned)
+
         tags = list(self._pending_tags)
         self._pending_tags = []
         self._first_sentence_emitted = True
-        return SentenceChunk(text=text, tags=tags)
+        return SentenceChunk(text=cleaned or text, tags=tags)

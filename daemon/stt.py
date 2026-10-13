@@ -102,7 +102,7 @@ class WhisperSTT:
                 audio,
                 language=language,
                 vad_filter=False,  # Audio is already pre-filtered by Silero VAD
-                beam_size=3,
+                beam_size=5,
                 temperature=[0.0, 0.2],
                 initial_prompt=self.cfg.initial_prompt,
                 condition_on_previous_text=False,
@@ -119,7 +119,7 @@ class WhisperSTT:
                 audio,
                 language=language,
                 vad_filter=False,
-                beam_size=3,
+                beam_size=5,
                 temperature=[0.0, 0.2],
                 initial_prompt=self.cfg.initial_prompt,
                 condition_on_previous_text=False,
@@ -140,7 +140,7 @@ class WhisperSTT:
                     text,
                 )
                 continue
-            if segment.avg_logprob < -1.65:
+            if segment.avg_logprob < -2.40:
                 logger.debug(
                     "STT: Discarded segment due to low avg_logprob (%.2f): '%s'",
                     segment.avg_logprob,

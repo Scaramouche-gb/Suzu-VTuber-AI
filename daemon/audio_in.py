@@ -160,7 +160,6 @@ class AudioInManager:
         active_speech_frames = 0
         speech_frames: list[np.ndarray] = []
 
-        consecutive_required = 3
         frame_duration_ms = (FRAME_SIZE / SAMPLE_RATE) * 1000.0  # 32 ms
 
         while self._running:
@@ -197,8 +196,8 @@ class AudioInManager:
                 min_rms = 0.018  # Must be audible spoken voice, not quiet keystrokes/creaks
             else:
                 threshold = base_threshold
-                required_frames = consecutive_required
-                min_rms = 0.0035
+                required_frames = 2  # 64ms for rapid voice onset
+                min_rms = 0.0018  # Sensitive to quiet and normal conversational speech
 
             # Evaluate VAD probability
             tensor_frame = torch.from_numpy(frame)
@@ -278,27 +277,36 @@ class AudioInManager:
             logger.debug("VAD: Rejected brief click (%.2fs < %.2fs)", duration_s, min_speech_s)
             return
 
-        # Reject transient noise spikes (fewer than ~224ms of active speech)
+        # Reject transient noise spikes (fewer than ~100ms of active speech)
         active_speech_s = (active_frames * FRAME_SIZE) / SAMPLE_RATE
-        if active_speech_s < 0.22:
+        if active_speech_s < 0.10:
             logger.debug(
-                "VAD: Rejected transient noise (active speech %.2fs < 0.22s)", active_speech_s
+                "VAD: Rejected transient noise (active speech %.2fs < 0.10s)", active_speech_s
             )
             return
 
         # Reject isolated sound impulses with low voice energy ratio
         speech_ratio = active_frames / max(1, len(frames))
-        if speech_ratio < 0.18:
+        if speech_ratio < 0.08:
             logger.debug(
-                "VAD: Rejected low-density noise spike (ratio=%.2f < 0.18)", speech_ratio
+                "VAD: Rejected low-density noise spike (ratio=%.2f < 0.08)", speech_ratio
             )
             return
 
         # Reject quiet ambient room noise / breathing (RMS threshold)
         rms = float(np.sqrt(np.mean(total_audio**2)))
-        if rms < 0.013:
-            logger.debug("VAD: Rejected quiet ambient noise (rms=%.4f < 0.0130)", rms)
+        if rms < 0.0025:
+            logger.debug("VAD: Rejected dead air / silence (rms=%.4f < 0.0025)", rms)
             return
+
+        # Dynamic Software AGC (Automatic Gain Control):
+        # Normalize speech amplitude so Whisper always receives clear, loud audio even with low mic gain
+        max_peak = float(np.max(np.abs(total_audio)))
+        if max_peak > 1e-4:
+            target_peak = 0.70
+            gain = min(8.0, target_peak / max_peak)
+            total_audio = (total_audio * gain).astype(np.float32)
+            rms = float(np.sqrt(np.mean(total_audio**2)))
 
         logger.info("VAD: Captured user phrase (duration: %.2fs, rms: %.4f)", duration_s, rms)
         await self.bus.publish(UserSpeech(audio_data=total_audio, duration_s=duration_s))
