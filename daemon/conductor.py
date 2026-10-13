@@ -23,6 +23,7 @@ from daemon.bus import (
     UserSpeech,
     UserSpeechStart,
 )
+from daemon.coder import AntigravityBridge, CodingTask
 from daemon.initiative import InitiativeDecision, InitiativeManager
 from daemon.launcher import AppLauncher
 from daemon.llm import LLMClient
@@ -51,6 +52,7 @@ class Conductor:
         initiative: InitiativeManager | None = None,
         memory: MemoryManager | None = None,
         rag: RAGManager | None = None,
+        coder: AntigravityBridge | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
@@ -63,6 +65,8 @@ class Conductor:
         self.tencent = TencentMemoryBridge()
         asyncio.create_task(self.tencent.initialize())
         self.rag = rag or RAGManager(memory=self.memory, tencent=self.tencent)
+        self.coder = coder or AntigravityBridge()
+        self._pending_coder_notice: str | None = None
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -100,6 +104,8 @@ class Conductor:
             self._initiative_task.cancel()
         if self._current_gen_task and not self._current_gen_task.done():
             self._current_gen_task.cancel()
+        if self.coder and self.coder.is_busy():
+            await self.coder.cancel_current_task()
         if self.memory:
             await self.memory.close()
         if self.tencent:
@@ -119,6 +125,22 @@ class Conductor:
                 )
         except (OSError, RuntimeError, ValueError) as exc:
             logger.warning("[Memory] Failed to restore history: %s", exc)
+
+    async def _on_coder_task_completed(self, task: CodingTask) -> None:
+        """Callback invoked when background Antigravity task finishes."""
+        status_text = (
+            "успешно выполнил задачу" if task.status == "completed" else "завершил с ошибкой"
+        )
+        summary = task.summary or task.error or "без подробностей"
+        notice = (
+            f"coder_done: Агент Антигравити {status_text} «{task.prompt}»! "
+            f"Итог: {summary[:300]}. Скажи пользователю живым голосом, что задача сделана и вкратце что там получилось."
+        )
+        logger.info("[Conductor] Antigravity task %s (%s): %s", task.id, task.status, summary)
+        self._pending_coder_notice = notice
+        if self.state == "idle" and (not self._current_gen_task or self._current_gen_task.done()):
+            self._pending_coder_notice = None
+            await self.process_proactive_turn(seed=notice)
 
     def set_state(self, new_state: str) -> None:
         """Update and broadcast state."""
@@ -318,6 +340,56 @@ class Conductor:
         elif re.search(r"\b(?:потише|сделай тише|убавь звук)\b", user_text, re.IGNORECASE):
             asyncio.create_task(AppLauncher.volume("down"))
 
+        # Antigravity coding agent intent recognition
+        code_start_match = re.search(
+            r"\b(?:попроси|пусть|дай задачу|напиши код|запусти код|поставь задачу)\s+(?:в\s+)?антигравити\s*(?:написать|сделать|выполнить)?\s*[:,-]?\s*(.+)",
+            user_text,
+            re.IGNORECASE,
+        )
+        if not code_start_match:
+            code_start_match = re.search(
+                r"\bантигравити\b[,\s]+(?:сделай|напиши|исправь|проверь|выполни|запусти)\s+(.+)",
+                user_text,
+                re.IGNORECASE,
+            )
+
+        coder_ctx = ""
+        if code_start_match:
+            task_prompt = code_start_match.group(1).strip()
+            _ok, msg = await self.coder.start_task(
+                prompt=task_prompt,
+                on_complete=self._on_coder_task_completed,
+            )
+            coder_ctx = f"Статус запуска задачи в Антигравити: {msg}. Обязательно подтверди пользователю голосом, что ты запустила кодинг в Антигравити!"
+
+        elif re.search(
+            r"\b(?:как там|статус|что делает|как поживает|что с задачей)\s+антигравити\b",
+            user_text,
+            re.IGNORECASE,
+        ) or re.search(r"\bантигравити\s+(?:статус|как там)\b", user_text, re.IGNORECASE):
+            st = self.coder.get_status()
+            if st["active"]:
+                coder_ctx = (
+                    f"Статус задачи Антигравити: выполняется уже {st['elapsed_seconds']} сек. "
+                    f"Текущая задача: «{st['prompt']}». Последний вывод: {st['latest_snippet']}"
+                )
+            else:
+                coder_ctx = (
+                    f"Статус Антигравити: {st.get('message', 'свободен')}. "
+                    f"Последняя задача: {st.get('prompt', 'нет')}, результат: {st.get('summary', 'нет')}"
+                )
+
+        elif re.search(
+            r"\b(?:стоп|отмени|останови|выключи)\s+(?:задачу\s+)?антигравити\b",
+            user_text,
+            re.IGNORECASE,
+        ):
+            _ok, msg = await self.coder.cancel_current_task()
+            coder_ctx = f"Результат отмены Антигравити: {msg}"
+
+        if coder_ctx:
+            context_info = f"{context_info}; {coder_ctx}" if context_info else coder_ctx
+
         # Context block from vision
         if context_info is None and self.vision:
             context_info = f"активное окно: {self.vision.active_app} ({self.vision.active_title}); {self.vision.screen_context}"
@@ -377,21 +449,32 @@ class Conductor:
                 image_base64 = base64.b64encode(latest_frame).decode("ascii")
                 logger.info("[Initiative] Attached live screen frame to proactive observation")
 
-        proactive_user_prompt = (
-            f"ТЫ СЕЙЧАС СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ (скриншот прикреплен к запросу).\n"
-            f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app} ({screen_desc}), молчим: {silence_min} мин, "
-            f"твоё настроение: {self.initiative.mood.value}.\n"
-            f"Твои прошлые недавние мысли: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ СМЫСЛ).\n\n"
-            f"ЗАДАЧА:\n"
-            f"1. Внимательно рассмотри прикреплённый скриншот экрана. Что именно сейчас открыто перед пользователем? "
-            f"Какой конкретно код (функции, переменные, логика), текст в консоли/терминале, веб-страница в браузере, ошибка или коммит видны на картинке?\n"
-            f"2. Сделай ОДНО меткое, живое, любопытное или ироничное замечание (1-2 коротких предложения вслух) "
-            f"СТРОГО о конкретной детали или строчке с экрана! (Подметь смешное название, баг в коде, команду, статью или то, что он долго ковыряет).\n"
-            f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить общие шаблонные фразы ('ты в терминале', 'ты на автопилоте', 'что кодишь?', 'ты залипаешь'). Говори только о реальных фактах с экрана!\n"
-            f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, усталость, отдых, режим ('пора спать', 'иди спать', 'ложись'). "
-            f"НЕ называй по имени. НЕ МАТЕРИСЬ без реального повода (мат допустим только если на экране лютая жесть или краш).\n"
-            f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если на экране ничего интересного или всё статично/пусто — выведи только <silent>."
-        )
+        if seed.startswith("coder_done:"):
+            proactive_user_prompt = (
+                f"СОБЫТИЕ: {seed}\n"
+                f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app}.\n\n"
+                f"ЗАДАЧА:\n"
+                f"1. Ты поручала автономному кодинг-агенту Антигравити задачу по коду, и он только что закончил работу!\n"
+                f"2. Сообщи пользователю бодро и живо (1-2 коротких предложения вслух), что Антигравити справился (или завершился с ошибкой), "
+                f"и вкратце передай суть того, что получилось.\n"
+                f"3. Используй тег эмоции <emo=happy:0.8> или <emo=surprised:0.8> и жест <gst=nod> или <gst=wave>."
+            )
+        else:
+            proactive_user_prompt = (
+                f"ТЫ СЕЙЧАС СМОТРИШЬ НА ЭКРАН ПОЛЬЗОВАТЕЛЯ (скриншот прикреплен к запросу).\n"
+                f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app} ({screen_desc}), молчим: {silence_min} мин, "
+                f"твоё настроение: {self.initiative.mood.value}.\n"
+                f"Твои прошлые недавние мысли: [{recent_inits}] (КАТЕГОРИЧЕСКИ НЕ ПОВТОРЯЙ ИХ СМЫСЛ).\n\n"
+                f"ЗАДАЧА:\n"
+                f"1. Внимательно рассмотри прикреплённый скриншот экрана. Что именно сейчас открыто перед пользователем? "
+                f"Какой конкретно код (функции, переменные, логика), текст в консоли/терминале, веб-страница в браузере, ошибка или коммит видны на картинке?\n"
+                f"2. Сделай ОДНО меткое, живое, любопытное или ироничное замечание (1-2 коротких предложения вслух) "
+                f"СТРОГО о конкретной детали или строчке с экрана! (Подметь смешное название, баг в коде, команду, статью или то, что он долго ковыряет).\n"
+                f"3. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО говорить общие шаблонные фразы ('ты в терминале', 'ты на автопилоте', 'что кодишь?', 'ты залипаешь'). Говори только о реальных фактах с экрана!\n"
+                f"4. СТРОГИЙ ЗАПРЕТ: НЕ говорить про сон, усталость, отдых, режим ('пора спать', 'иди спать', 'ложись'). "
+                f"НЕ называй по имени. НЕ МАТЕРИСЬ без реального повода (мат допустим только если на экране лютая жесть или краш).\n"
+                f"5. Обязательно ставь теги эмоций и жестов в начале (например, <emo=curious:0.8><look=screen>). Если на экране ничего интересного или всё статично/пусто — выведи только <silent>."
+            )
 
         self._current_gen_task = asyncio.create_task(
             self._generate_turn(
@@ -611,6 +694,13 @@ class Conductor:
             elif tag.action.startswith("volume:"):
                 direction = tag.action.split("volume:", 1)[1]
                 asyncio.create_task(AppLauncher.volume(direction))
+            elif tag.action.startswith("code:"):
+                prompt = tag.action.split("code:", 1)[1]
+                asyncio.create_task(
+                    self.coder.start_task(prompt, on_complete=self._on_coder_task_completed)
+                )
+            elif tag.action == "code_cancel":
+                asyncio.create_task(self.coder.cancel_current_task())
 
     async def _dispatch_sentence_chunk(
         self,
@@ -749,6 +839,17 @@ class Conductor:
 
         active_app = self.vision.active_app if self.vision else ""
         screen_context = self.vision.screen_context if self.vision else ""
+
+        if (
+            self._pending_coder_notice
+            and not is_user_speaking
+            and not is_avatar_speaking
+            and not is_llm_busy
+        ):
+            notice = self._pending_coder_notice
+            self._pending_coder_notice = None
+            await self.process_proactive_turn(seed=notice)
+            return
 
         decision: InitiativeDecision = self.initiative.evaluate_tick(
             dt=dt,
