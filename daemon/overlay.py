@@ -13,7 +13,7 @@ os.environ.setdefault(
 
 
 def run_overlay(
-    url: str = "http://127.0.0.1:8765/index.html?fit=bust", width: int = 420, height: int = 720
+    url: str = "http://127.0.0.1:8765/index.html?fit=bust", width: int = 486, height: int = 547
 ) -> None:
     try:
         from PyQt6.QtCore import Qt, QUrl
@@ -51,7 +51,7 @@ def run_overlay(
     if screen:
         geo = screen.availableGeometry()
         x = geo.width() - width - 16
-        y = geo.height() - height - 16
+        y = geo.height() - height - 4
         view.setGeometry(x, y, width, height)
     else:
         view.resize(width, height)
