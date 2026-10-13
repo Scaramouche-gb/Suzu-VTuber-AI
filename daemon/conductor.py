@@ -25,6 +25,7 @@ from daemon.bus import (
 from daemon.initiative import InitiativeDecision, InitiativeManager
 from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
+from daemon.rag import RAGManager
 from daemon.sentence import SentenceChunk, SentenceSplitter
 from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
 from daemon.tencent_bridge import TencentMemoryBridge
@@ -47,6 +48,7 @@ class Conductor:
         vision: Any | None = None,
         initiative: InitiativeManager | None = None,
         memory: MemoryManager | None = None,
+        rag: RAGManager | None = None,
     ) -> None:
         self.llm = llm
         self.ws = ws_server
@@ -58,6 +60,7 @@ class Conductor:
         self.memory = memory
         self.tencent = TencentMemoryBridge()
         asyncio.create_task(self.tencent.initialize())
+        self.rag = rag or RAGManager(memory=self.memory, tencent=self.tencent)
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -314,16 +317,16 @@ class Conductor:
             episode_records = await self.memory.get_recent_episodes(limit=5)
             episodes_list = [e.summary for e in episode_records]
 
-        # Semantic retrieval of project knowledge from TencentDB Agent Memory
+        # Two-Tier Hybrid RAG retrieval (Tier 1 SQLite FTS5 + Tier 2 TencentDB Agent Memory)
         project_notes = None
-        if self.tencent:
+        if self.rag:
             active_app = self.vision.active_app if self.vision else ""
             active_title = self.vision.active_title if self.vision else ""
-            project_notes = await self.tencent.search_project_context(
+            project_notes = await self.rag.retrieve(
                 query=user_text,
                 active_app=active_app,
                 active_title=active_title,
-                limit=3,
+                max_items=3,
             )
 
         if is_proactive:

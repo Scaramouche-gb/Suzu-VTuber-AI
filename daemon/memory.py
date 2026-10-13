@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sqlite3
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -98,6 +99,35 @@ class MemoryManager:
                 summary TEXT NOT NULL
             );
         """)
+        # FTS5 full-text search table for sub-millisecond BM25 keyword retrieval
+        await conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS facts_fts USING fts5(
+                text,
+                content='facts',
+                content_rowid='id'
+            );
+        """)
+        await conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS facts_ai AFTER INSERT ON facts BEGIN
+                INSERT INTO facts_fts(rowid, text) VALUES (new.id, new.text);
+            END;
+        """)
+        await conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS facts_ad AFTER DELETE ON facts BEGIN
+                INSERT INTO facts_fts(facts_fts, rowid, text) VALUES('delete', old.id, old.text);
+            END;
+        """)
+        await conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS facts_au AFTER UPDATE ON facts BEGIN
+                INSERT INTO facts_fts(facts_fts, rowid, text) VALUES('delete', old.id, old.text);
+                INSERT INTO facts_fts(rowid, text) VALUES (new.id, new.text);
+            END;
+        """)
+        # Populate FTS from existing facts if empty
+        async with conn.execute("SELECT COUNT(*) FROM facts_fts") as cur:
+            row = await cur.fetchone()
+            if not row or row[0] == 0:
+                await conn.execute("INSERT INTO facts_fts(facts_fts) VALUES('rebuild')")
         await conn.commit()
 
     async def close(self) -> None:
@@ -179,6 +209,31 @@ class MemoryManager:
             )
             for r in rows
         ]
+
+    async def search_facts_fts(self, query: str, limit: int = 5) -> list[str]:
+        """Perform sub-millisecond BM25 keyword search using SQLite FTS5."""
+        clean = re.sub(r"[^\w\sа-яА-ЯёЁ]", " ", query).strip()
+        tokens = [t for t in clean.split() if len(t) >= 2]
+        if not tokens:
+            return []
+
+        fts_query = " OR ".join(f"{t}*" for t in tokens[:6])
+        conn = await self._get_conn()
+        try:
+            async with conn.execute(
+                """
+                SELECT text FROM facts_fts
+                WHERE facts_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (fts_query, limit),
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [r[0] for r in rows]
+        except (aiosqlite.Error, sqlite3.OperationalError) as exc:
+            logger.debug("FTS5 query '%s' failed: %s", fts_query, exc)
+            return []
 
     async def delete_fact(self, fact_id: int) -> bool:
         """Delete fact by ID."""
