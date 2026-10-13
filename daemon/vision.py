@@ -74,7 +74,9 @@ class VisionManager:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                "driftwm", "msg", "state",
+                "driftwm",
+                "msg",
+                "state",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -126,10 +128,14 @@ class VisionManager:
         target_out = output_name or self.cfg.output or "eDP-1"
         cmd = [
             "grim",
-            "-o", target_out,
-            "-s", str(self.cfg.scale),
-            "-t", "jpeg",
-            "-q", str(self.cfg.jpeg_quality),
+            "-o",
+            target_out,
+            "-s",
+            str(self.cfg.scale),
+            "-t",
+            "jpeg",
+            "-q",
+            str(self.cfg.jpeg_quality),
             "-",
         ]
 
@@ -235,7 +241,9 @@ class VisionManager:
             self._consecutive_heavy_diffs += 1
             if self._consecutive_heavy_diffs >= 5:
                 self._is_video_mode = True
-                self.screen_context = f"пользователь смотрит видео или динамичный контент в {app_id}"
+                self.screen_context = (
+                    f"пользователь смотрит видео или динамичный контент в {app_id}"
+                )
         else:
             self._consecutive_heavy_diffs = 0
             self._is_video_mode = False
@@ -253,7 +261,12 @@ class VisionManager:
         ):
             self._last_trigger_time = now
             self._vlm_calls_this_hour += 1
-            logger.info("Screen noticeably changed (diff=%.2f, hash=%d, app=%s)", diff_ratio, hash_diff, app_id)
+            logger.info(
+                "Screen noticeably changed (diff=%.2f, hash=%d, app=%s)",
+                diff_ratio,
+                hash_diff,
+                app_id,
+            )
             await self.bus.publish(
                 ScreenChange(
                     image_bytes=jpeg_data,

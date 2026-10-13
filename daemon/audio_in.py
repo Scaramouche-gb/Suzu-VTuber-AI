@@ -37,7 +37,9 @@ class AudioInManager:
         self._process_task: asyncio.Task[None] | None = None
 
         # Pre-roll ring buffer: 300ms = ~10 frames of 512 samples
-        self._preroll_frames_count = max(1, int((cfg.preroll_ms / 1000.0) * (SAMPLE_RATE / FRAME_SIZE)))
+        self._preroll_frames_count = max(
+            1, int((cfg.preroll_ms / 1000.0) * (SAMPLE_RATE / FRAME_SIZE))
+        )
         self._preroll_buffer: deque[np.ndarray] = deque(maxlen=self._preroll_frames_count)
 
         # Bus subscriptions for echo threshold adaptation
@@ -57,6 +59,7 @@ class AudioInManager:
             try:
                 # Silero VAD via torch hub or silero_vad package
                 from silero_vad import load_silero_vad
+
                 self._vad_model = load_silero_vad()
             except ImportError:
                 model, _ = torch.hub.load(
@@ -85,7 +88,9 @@ class AudioInManager:
         self._running = True
         self.load_vad_model()
 
-        def audio_callback(indata: np.ndarray, frames: int, time_info: Any, status: sd.CallbackFlags) -> None:
+        def audio_callback(
+            indata: np.ndarray, frames: int, time_info: Any, status: sd.CallbackFlags
+        ) -> None:
             if status:
                 logger.warning("sounddevice status: %s", status)
             # Copy float32 audio frame to queue
@@ -103,7 +108,11 @@ class AudioInManager:
                 callback=audio_callback,
             )
             self._stream.start()
-            logger.info("Audio capture started (device: %s, sample_rate: %d)", device or "default", SAMPLE_RATE)
+            logger.info(
+                "Audio capture started (device: %s, sample_rate: %d)",
+                device or "default",
+                SAMPLE_RATE,
+            )
             self._process_task = asyncio.create_task(self._vad_loop())
         except (sd.PortAudioError, OSError, RuntimeError) as exc:
             logger.error("Failed to start sounddevice InputStream: %s", exc)
@@ -156,9 +165,10 @@ class AudioInManager:
                     is_in_speech = False
                 continue
 
-            # Compute threshold (boost during TTS speech for echo rejection)
+            # Compute threshold (boost during TTS speech for strict echo rejection)
             base_threshold = self.cfg.vad_threshold
-            threshold = 0.85 if self._is_speaking_tts else base_threshold
+            threshold = 0.94 if self._is_speaking_tts else base_threshold
+            required_frames = 4 if self._is_speaking_tts else consecutive_required
 
             # Evaluate VAD probability
             tensor_frame = torch.from_numpy(frame)
@@ -168,14 +178,17 @@ class AudioInManager:
                 prob = 0.0
 
             if not is_in_speech:
-                self._preroll_buffer.append(frame)
+                if self._is_speaking_tts:
+                    self._preroll_buffer.clear()
+                else:
+                    self._preroll_buffer.append(frame)
 
                 if prob >= threshold:
                     consecutive_speech_frames += 1
                 else:
                     consecutive_speech_frames = 0
 
-                if consecutive_speech_frames >= consecutive_required:
+                if consecutive_speech_frames >= required_frames:
                     # Voice activity detected!
                     is_in_speech = True
                     consecutive_speech_frames = 0
@@ -183,7 +196,11 @@ class AudioInManager:
                     speech_frames = list(self._preroll_buffer)
                     self._preroll_buffer.clear()
 
-                    logger.debug("VAD: User speech started (prob=%.2f)", prob)
+                    logger.debug(
+                        "VAD: User speech started (prob=%.2f, tts_active=%s)",
+                        prob,
+                        self._is_speaking_tts,
+                    )
                     await self.bus.publish(UserSpeechStart())
 
             else:
@@ -197,7 +214,10 @@ class AudioInManager:
                 current_total_duration_ms = len(speech_frames) * frame_duration_ms
 
                 # Check if silence threshold exceeded OR max phrase duration (30s) reached
-                if silence_duration_ms >= self.cfg.end_silence_ms or current_total_duration_ms >= 30000.0:
+                if (
+                    silence_duration_ms >= self.cfg.end_silence_ms
+                    or current_total_duration_ms >= 30000.0
+                ):
                     await self._finish_phrase(speech_frames)
                     speech_frames = []
                     is_in_speech = False

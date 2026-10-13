@@ -27,9 +27,11 @@ const ws = new VTuberWSClient();
 
 // Wire up lipsync callbacks with WS
 lipsync.onPlaybackStarted = (id) => {
+  avatar.setState('speaking');
   ws.sendPlaybackStarted(id);
 };
 lipsync.onPlaybackEnded = (id) => {
+  avatar.setState('idle');
   ws.sendPlaybackEnded(id);
 };
 
@@ -68,6 +70,7 @@ canvas.addEventListener('click', (e) => {
 // Handle WebSocket messages
 ws.on('state', (data) => {
   console.log('[Daemon State]', data.value);
+  avatar.setState(data.value);
   if (data.value === 'thinking') {
     avatar.setLookTarget('point', 0.8, 0.1);
   } else if (data.value === 'listening') {
@@ -150,10 +153,18 @@ function animate(currentTime) {
   const delta = Math.min(deltaMs / 1000, 0.1);
   lastTime = currentTime - (deltaMs % interval);
 
+  // 1. Prepare base pose with natural idle, breathing, and hip/spine sway
+  avatar.preparePose(delta);
+
+  // 2. Layer procedural gestures (nod, shrug, wave, think, laugh) on top
+  gestures.update(delta);
+
+  // 3. Apply facial expressions and lipsync morph targets
   emotions.update(delta);
   lipsync.update(delta);
-  gestures.update(delta);
-  avatar.update(delta);
+
+  // 4. Update spring physics (hair, clothing, ribbons) and render frame
+  avatar.finishFrame(delta);
 }
 
 requestAnimationFrame(animate);

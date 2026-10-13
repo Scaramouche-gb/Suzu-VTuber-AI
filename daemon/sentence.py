@@ -9,9 +9,27 @@ from daemon.tagparser import TagItem
 
 # Common Russian and English abbreviations that end with a dot but should NOT terminate a sentence
 ABBREVIATIONS = {
-    "т.е.", "и.т.д.", "и.т.п.", "т.д.", "т.п.",
-    "руб.", "коп.", "г.", "ул.", "д.", "кв.", "стр.",
-    "e.g.", "i.e.", "etc.", "vs.", "mr.", "mrs.", "ms.", "dr.", "prof.",
+    "т.е.",
+    "и.т.д.",
+    "и.т.п.",
+    "т.д.",
+    "т.п.",
+    "руб.",
+    "коп.",
+    "г.",
+    "ул.",
+    "д.",
+    "кв.",
+    "стр.",
+    "e.g.",
+    "i.e.",
+    "etc.",
+    "vs.",
+    "mr.",
+    "mrs.",
+    "ms.",
+    "dr.",
+    "prof.",
 }
 
 # Regex to detect trailing numbers like "3." in "3.14" or list items
@@ -23,6 +41,7 @@ CLAUSE_SPLIT_REGEX = re.compile(r"[,;:\—\-]\s+")
 @dataclass(slots=True)
 class SentenceChunk:
     """A single sentence or clause ready for TTS with its associated tags."""
+
     text: str
     tags: list[TagItem] = field(default_factory=list)
 
@@ -56,7 +75,7 @@ class SentenceSplitter:
         while True:
             # Check if we should force-split a very long buffer without punctuation
             if len(self._text_buffer) >= self.max_length:
-                split_idx = self._find_clause_break(self._text_buffer[:self.max_length])
+                split_idx = self._find_clause_break(self._text_buffer[: self.max_length])
                 if split_idx != -1:
                     sentence_text = self._text_buffer[:split_idx].strip()
                     self._text_buffer = self._text_buffer[split_idx:].lstrip()
@@ -65,7 +84,7 @@ class SentenceSplitter:
                     continue
                 else:
                     # No clause break, split at last space
-                    space_idx = self._text_buffer[:self.max_length].rfind(" ")
+                    space_idx = self._text_buffer[: self.max_length].rfind(" ")
                     if space_idx > self.min_length:
                         sentence_text = self._text_buffer[:space_idx].strip()
                         self._text_buffer = self._text_buffer[space_idx:].lstrip()
@@ -81,7 +100,11 @@ class SentenceSplitter:
             min_len = 15 if not self._first_sentence_emitted else self.min_length
 
             # If candidate is too short and not flushing, wait for more text
-            if len(candidate) < min_len and not is_flush and len(self._text_buffer) < self.max_length:
+            if (
+                len(candidate) < min_len
+                and not is_flush
+                and len(self._text_buffer) < self.max_length
+            ):
                 break
 
             self._text_buffer = self._text_buffer[boundary_idx:].lstrip()
@@ -105,7 +128,11 @@ class SentenceSplitter:
                 last_word = words[-1].lower()
                 if last_word in ABBREVIATIONS:
                     continue
-                if DECIMAL_OR_NUM_REGEX.search(last_word) and end_pos < len(text) and text[end_pos].isdigit():
+                if (
+                    DECIMAL_OR_NUM_REGEX.search(last_word)
+                    and end_pos < len(text)
+                    and text[end_pos].isdigit()
+                ):
                     continue
 
             # Valid boundary found if followed by whitespace, newline or end of text

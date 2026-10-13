@@ -16,7 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns for sensitive data redaction
 RE_CREDIT_CARD = re.compile(r"\b(?:\d[ -]*?){13,16}\b")
-RE_API_KEY = re.compile(r"\b(?:sk-[a-zA-Z0-9_\-]{20,}|ghp_[a-zA-Z0-9]{20,}|Bearer\s+[a-zA-Z0-9_\-\.]{20,})\b")
+RE_API_KEY = re.compile(
+    r"\b(?:sk-[a-zA-Z0-9_\-]{20,}|ghp_[a-zA-Z0-9]{20,}|Bearer\s+[a-zA-Z0-9_\-\.]{20,})\b"
+)
 RE_PASSWORD = re.compile(r"(?i)\b(?:password|passwd|пароль)\s*[:=]\s*(\S+)")
 
 
@@ -301,7 +303,9 @@ class MemoryManager:
         try:
             full_reply: list[str] = []
             messages = [{"role": "user", "content": prompt}]
-            async for token in llm_client.stream_response(messages, model=llm_client.cfg.fast_model):
+            async for token in llm_client.stream_response(
+                messages, model=llm_client.cfg.fast_model
+            ):
                 full_reply.append(token)
 
             raw_json = "".join(full_reply).strip()
@@ -324,5 +328,12 @@ class MemoryManager:
 
             self._unsummarized_turns = 0
 
-        except (RuntimeError, ValueError, OSError, TimeoutError, json.JSONDecodeError, KeyError) as exc:
+        except (
+            RuntimeError,
+            ValueError,
+            OSError,
+            TimeoutError,
+            json.JSONDecodeError,
+            KeyError,
+        ) as exc:
             logger.warning("[Memory] Summarization extraction failed: %s", exc)

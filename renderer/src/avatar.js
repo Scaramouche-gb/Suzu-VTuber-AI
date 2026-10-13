@@ -14,14 +14,19 @@ export class AvatarController {
     this.lookTarget = null;
     this.clock = new THREE.Clock();
 
-    // Life signs state
+    // Life signs & procedural motion state
     this.blinkTimer = 0;
-    this.nextBlinkInterval = 3.0;
+    this.nextBlinkInterval = 3.2;
     this.isBlinking = false;
     this.blinkProgress = 0;
 
     this.breathTime = 0;
     this.headNoiseTime = 0;
+    this.swayTime = 0;
+    this.speakTime = 0;
+
+    // Interactive state: 'idle' | 'listening' | 'thinking' | 'speaking'
+    this.state = 'idle';
 
     // Target positions
     this.cursorPosition = new THREE.Vector2(0, 0);
@@ -55,11 +60,11 @@ export class AvatarController {
     this.updateCameraPlacement();
 
     // Lighting
-    const directionalLight = new THREE.DirectionalLight(0xffffff, Math.PI * 0.9);
-    directionalLight.position.set(1.0, 1.5, 1.0).normalize();
+    const directionalLight = new THREE.DirectionalLight(0xffffff, Math.PI * 0.95);
+    directionalLight.position.set(1.0, 1.6, 1.2).normalize();
     this.scene.add(directionalLight);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.75);
     this.scene.add(ambientLight);
 
     this.lookTarget = new THREE.Object3D();
@@ -71,7 +76,7 @@ export class AvatarController {
 
   updateCameraPlacement() {
     if (this.fitMode === 'bust') {
-      // Focus on bust (chest, shoulders and head nicely framed with breathing room)
+      // Focus on bust (chest, shoulders, head nicely framed with breathing room)
       this.camera.position.set(0, 1.16 + this.yOffset, 1.85 / this.scale);
       this.camera.lookAt(0, 1.10 + this.yOffset, 0);
     } else {
@@ -137,7 +142,7 @@ export class AvatarController {
 
     this.mixer = new THREE.AnimationMixer(vrm.scene);
 
-    // Initial setup (face camera towards +Z)
+    // Initial setup: face camera (+Z)
     vrm.scene.rotation.y = Math.PI;
     return vrm;
   }
@@ -148,22 +153,33 @@ export class AvatarController {
     }
   }
 
-  update(delta) {
+  setState(newState) {
+    this.state = newState;
+  }
+
+  preparePose(delta) {
     if (!this.vrm) return;
 
-    // 1. Reset normalized pose each frame to avoid accumulation distortion
+    // 1. Reset normalized humanoid pose
     if (this.vrm.humanoid) {
       this.vrm.humanoid.resetNormalizedPose();
     }
 
-    // 2. Apply natural idle rest pose (arms down, breathing, subtle head motion)
+    // 2. Apply rich procedural life pose (sway, breathing, reactive state)
     this.applyIdlePose(delta);
+  }
+
+  finishFrame(delta) {
+    if (!this.vrm) return;
 
     // 3. Life signs: Blinking
     this.updateBlinking(delta);
 
-    // 4. LookAt smooth interpolation
-    this.currentLookPos.lerp(this.targetLookPos, Math.min(1.0, delta * 6.0));
+    // 4. Smooth LookAt interpolation with subtle saccadic micro-drift
+    const saccadeX = Math.sin(this.breathTime * 1.7) * 0.015;
+    const saccadeY = Math.cos(this.breathTime * 1.3) * 0.01;
+    const driftedLook = this.targetLookPos.clone().add(new THREE.Vector3(saccadeX, saccadeY, 0));
+    this.currentLookPos.lerp(driftedLook, Math.min(1.0, delta * 5.0));
     this.lookTarget.position.copy(this.currentLookPos);
 
     // 5. Animation mixer
@@ -171,49 +187,99 @@ export class AvatarController {
       this.mixer.update(delta);
     }
 
-    // 6. VRM Spring bones & constraints
+    // 6. Spring bones physics (hair, ribbons, clothes)
     this.vrm.update(delta);
 
     // 7. Render
     this.renderer.render(this.scene, this.camera);
   }
 
+  update(delta) {
+    this.preparePose(delta);
+    this.finishFrame(delta);
+  }
+
   applyIdlePose(delta) {
     if (!this.vrm || !this.vrm.humanoid) return;
 
     this.breathTime += delta;
-    const breathCycle = Math.sin((this.breathTime * Math.PI * 2) / 4.0);
-    const breathAngle = breathCycle * 0.015;
+    this.swayTime += delta * 0.6;
+    this.headNoiseTime += delta * 0.75;
 
-    // Spine & chest breathing
+    // 1. Natural respiration cycle (~4.2s per full breath)
+    const breathCycle = Math.sin((this.breathTime * Math.PI * 2) / 4.2);
+    const breathAngle = breathCycle * 0.02;
+
+    // 2. Organic weight shifting / hip & spine lateral sway (~7s cycle)
+    const hipSway = Math.sin(this.swayTime) * 0.026;
+    const spineCounterSway = -hipSway * 0.65;
+    const chestCounterSway = -hipSway * 0.35;
+
+    // Hips / Pelvis
+    const hips = this.vrm.humanoid.getNormalizedBoneNode('hips');
+    if (hips) {
+      hips.rotation.z = hipSway;
+      hips.rotation.y = Math.cos(this.swayTime * 0.5) * 0.015;
+    }
+
+    // Spine & chest
     const spine = this.vrm.humanoid.getNormalizedBoneNode('spine');
     const chest = this.vrm.humanoid.getNormalizedBoneNode('chest');
-    if (spine) spine.rotation.x = -0.01 + breathAngle * 0.4;
-    if (chest) chest.rotation.x = 0.01 + breathAngle * 0.8;
+    const upperChest = this.vrm.humanoid.getNormalizedBoneNode('upperChest');
 
-    // Subtle head micro-motion (set directly, NO += accumulator)
-    this.headNoiseTime += delta * 0.8;
+    if (spine) {
+      spine.rotation.set(-0.01 + breathAngle * 0.4, 0, spineCounterSway);
+    }
+    if (chest) {
+      chest.rotation.set(0.015 + breathAngle * 0.8, 0, chestCounterSway);
+    }
+    if (upperChest) {
+      upperChest.rotation.set(0.01 + breathAngle * 0.3, 0, 0);
+    }
+
+    // 3. Head & neck micro-motion with reactive state
     const head = this.vrm.humanoid.getNormalizedBoneNode('head');
     const neck = this.vrm.humanoid.getNormalizedBoneNode('neck');
-    const microYaw = Math.sin(this.headNoiseTime * 1.3) * 0.025;
-    const microPitch = Math.sin(this.headNoiseTime * 0.9 + 1.0) * 0.018;
-    const microRoll = Math.sin(this.headNoiseTime * 0.7) * 0.012;
+
+    let microYaw = Math.sin(this.headNoiseTime * 1.1) * 0.028;
+    let microPitch = Math.sin(this.headNoiseTime * 0.85 + 1.2) * 0.02;
+    let microRoll = Math.sin(this.headNoiseTime * 0.65) * 0.016 + spineCounterSway * 0.4;
+
+    // Reactive posture adjustments
+    if (this.state === 'listening') {
+      microPitch -= 0.035; // Head tilted slightly up towards user
+      microRoll += 0.045;  // Inquisitive head tilt
+    } else if (this.state === 'thinking') {
+      microPitch -= 0.055; // Pensive upward gaze
+      microYaw += 0.08;
+      microRoll += 0.07;
+    } else if (this.state === 'speaking') {
+      this.speakTime += delta * 3.8;
+      microPitch += Math.sin(this.speakTime) * 0.024; // Conversational rhythm nod
+      microYaw += Math.cos(this.speakTime * 0.5) * 0.018;
+    }
 
     if (head) {
       head.rotation.set(microPitch, microYaw, microRoll);
     }
     if (neck) {
-      neck.rotation.set(microPitch * 0.3, microYaw * 0.3, 0);
+      neck.rotation.set(microPitch * 0.35, microYaw * 0.35, microRoll * 0.25);
     }
 
-    // Natural arms resting alongside the torso (removes T-Pose!)
+    // 4. Natural arm relaxation and coordination with breathing & hip sway
     const leftUpperArm = this.vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
     const leftLowerArm = this.vrm.humanoid.getNormalizedBoneNode('leftLowerArm');
     const leftHand = this.vrm.humanoid.getNormalizedBoneNode('leftHand');
     const leftShoulder = this.vrm.humanoid.getNormalizedBoneNode('leftShoulder');
 
+    const armSway = hipSway * 0.4;
+
     if (leftUpperArm) {
-      leftUpperArm.rotation.set(0.08, 0.05, 1.25 - breathAngle * 0.3);
+      leftUpperArm.rotation.set(
+        0.08 + Math.sin(this.swayTime) * 0.02,
+        0.05,
+        1.25 - breathAngle * 0.3 + armSway
+      );
     }
     if (leftLowerArm) {
       leftLowerArm.rotation.set(0.18, 0.0, 0.12);
@@ -222,7 +288,7 @@ export class AvatarController {
       leftHand.rotation.set(0.05, 0.0, 0.05);
     }
     if (leftShoulder) {
-      leftShoulder.rotation.set(0.0, 0.0, 0.04);
+      leftShoulder.rotation.set(0.0, 0.0, 0.04 + breathAngle * 0.2);
     }
 
     const rightUpperArm = this.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
@@ -231,7 +297,11 @@ export class AvatarController {
     const rightShoulder = this.vrm.humanoid.getNormalizedBoneNode('rightShoulder');
 
     if (rightUpperArm) {
-      rightUpperArm.rotation.set(0.08, -0.05, -1.25 + breathAngle * 0.3);
+      rightUpperArm.rotation.set(
+        0.08 - Math.sin(this.swayTime) * 0.02,
+        -0.05,
+        -1.25 + breathAngle * 0.3 + armSway
+      );
     }
     if (rightLowerArm) {
       rightLowerArm.rotation.set(0.18, 0.0, -0.12);
@@ -240,7 +310,7 @@ export class AvatarController {
       rightHand.rotation.set(0.05, 0.0, -0.05);
     }
     if (rightShoulder) {
-      rightShoulder.rotation.set(0.0, 0.0, -0.04);
+      rightShoulder.rotation.set(0.0, 0.0, -0.04 - breathAngle * 0.2);
     }
   }
 
@@ -252,11 +322,11 @@ export class AvatarController {
       this.isBlinking = true;
       this.blinkProgress = 0;
       this.blinkTimer = 0;
-      this.nextBlinkInterval = 2.0 + Math.random() * 4.0;
+      this.nextBlinkInterval = 2.2 + Math.random() * 3.8;
     }
 
     if (this.isBlinking) {
-      this.blinkProgress += delta / 0.16; // ~160ms blink duration
+      this.blinkProgress += delta / 0.16; // ~160ms natural blink duration
       let weight = 0;
       if (this.blinkProgress <= 0.5) {
         weight = this.blinkProgress * 2;
@@ -266,7 +336,11 @@ export class AvatarController {
         this.isBlinking = false;
         weight = 0;
       }
-      this.vrm.expressionManager.setValue('blink', weight);
+      try {
+        this.vrm.expressionManager.setValue('blink', weight);
+      } catch {
+        // Fallback if blink name is different
+      }
     }
   }
 

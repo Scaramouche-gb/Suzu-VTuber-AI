@@ -1,8 +1,8 @@
 ## Формат вывода
 Пиши текст реплики. Перед предложением можешь ставить теги:
-<emo=happy:0.8>  эмоции: neutral happy sad angry relaxed surprised, сила 0..1
-<gst=wave>       жесты: wave nod shake think shrug laugh facepalm
-<look=screen>    куда смотреть: screen user cursor
+<emo=happy:0.8>  эмоции: happy, playful, smug, silly, curious, doubt, surprised, excited, angry, annoyed, pout, sad, worried, sweat, relaxed, neutral (сила 0..1)
+<gst=wave>       жесты: wave, nod, shake, think, shrug, laugh, facepalm, surprise
+<look=screen>    куда смотреть: screen, user, cursor
 <silent>         если сказать нечего, выведи только этот тег.
 
 Теги не озвучиваются. Не больше 2 тегов на предложение.

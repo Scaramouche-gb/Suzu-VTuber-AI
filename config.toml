@@ -1,6 +1,6 @@
 [general]
 name = "Сузу"
-user_name = "Хозяин"
+user_name = "Макс"
 language = "ru"
 log_level = "INFO"
 
@@ -9,9 +9,9 @@ host = "127.0.0.1"
 port = 8765
 
 [llm]
-chat_model = "openai/gpt-5.6-luna"
-fast_model = "openai/gpt-5.6-luna"
-fallback_model = "openai/claude-haiku-4-5-20251001"
+chat_model = "openai/claude-haiku-4-5-20251001"
+fast_model = "openai/claude-haiku-4-5-20251001"
+fallback_model = "openai/gpt-5.6-luna"
 api_base = "https://codex.sale/v1"
 temperature = 0.8
 max_tokens = 300
@@ -54,11 +54,11 @@ blacklist_title_globs = ["*Bank*", "*Банк*", "*пароль*", "*password*"]
 
 [initiative]
 enabled = true
-mean_interval_s = 60
-min_gap_s = 25
+mean_interval_s = 40
+min_gap_s = 20
 quiet_hours = []
-backoff_factor = 1.5
-max_backoff_s = 600
+backoff_factor = 1.2
+max_backoff_s = 150
 
 [memory]
 db_path = "~/.local/share/vtuber/memory.db"

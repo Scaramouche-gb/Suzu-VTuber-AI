@@ -12,7 +12,9 @@ os.environ.setdefault(
 )
 
 
-def run_overlay(url: str = "http://127.0.0.1:8765/index.html?fit=bust", width: int = 420, height: int = 720) -> None:
+def run_overlay(
+    url: str = "http://127.0.0.1:8765/index.html?fit=bust", width: int = 420, height: int = 720
+) -> None:
     try:
         from PyQt6.QtCore import Qt, QUrl
         from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -42,10 +44,7 @@ def run_overlay(url: str = "http://127.0.0.1:8765/index.html?fit=bust", width: i
     settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
 
     # Frameless always-on-top window for Wayland / driftwm
-    view.setWindowFlags(
-        Qt.WindowType.FramelessWindowHint
-        | Qt.WindowType.WindowStaysOnTopHint
-    )
+    view.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
 
     # Position in bottom-right corner
     screen = app.primaryScreen()

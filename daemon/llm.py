@@ -48,12 +48,19 @@ class BudgetTracker:
             self.budget_exceeded = False
 
         self.spent_usd += cost
-        logger.info("LLM call cost: $%.5f (Daily total: $%.4f / $%.2f)", cost, self.spent_usd, self.max_usd_per_day)
+        logger.info(
+            "LLM call cost: $%.5f (Daily total: $%.4f / $%.2f)",
+            cost,
+            self.spent_usd,
+            self.max_usd_per_day,
+        )
 
         if self.spent_usd >= self.max_usd_per_day and not self.budget_exceeded:
             self.budget_exceeded = True
-            logger.warning("Daily LLM budget of $%.2f exceeded! Restricting background tasks.", self.max_usd_per_day)
-
+            logger.warning(
+                "Daily LLM budget of $%.2f exceeded! Restricting background tasks.",
+                self.max_usd_per_day,
+            )
 
 
 class LLMClient:
@@ -90,7 +97,9 @@ class LLMClient:
             facts_block = "\n## ФАКТЫ О ПОЛЬЗОВАТЕЛЕ:\n" + "\n".join(f"- {f}" for f in facts[:20])
             system_parts.append(facts_block)
         if episodes:
-            episodes_block = "\n## ЗАМЕТКИ ПРОШЛЫХ РАЗГОВОРОВ:\n" + "\n".join(f"- {e}" for e in episodes[:5])
+            episodes_block = "\n## ЗАМЕТКИ ПРОШЛЫХ РАЗГОВОРОВ:\n" + "\n".join(
+                f"- {e}" for e in episodes[:5]
+            )
             system_parts.append(episodes_block)
 
         messages.append({"role": "system", "content": "\n\n".join(p for p in system_parts if p)})
@@ -108,13 +117,18 @@ class LLMClient:
         user_content_text = f"{context_prefix}\n----\nРЕПЛИКА: «{user_message}»"
 
         if image_base64:
-            messages.append({
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": user_content_text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}},
-                ],
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_content_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"},
+                        },
+                    ],
+                }
+            )
         else:
             messages.append({"role": "user", "content": user_content_text})
 
@@ -139,14 +153,35 @@ class LLMClient:
             async for chunk in self._attempt_stream(target_model, messages, timeout_first_token):
                 yield chunk
             return
-        except (litellm.exceptions.APIError, TimeoutError, ConnectionError, OSError, RuntimeError, ValueError) as exc:
-            logger.warning("Primary LLM (%s) failed: %s. Switching to fallback (%s)", target_model, exc, self.cfg.fallback_model)
+        except (
+            litellm.exceptions.APIError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
+            logger.warning(
+                "Primary LLM (%s) failed: %s. Switching to fallback (%s)",
+                target_model,
+                exc,
+                self.cfg.fallback_model,
+            )
 
         # Attempt fallback model
         try:
-            async for chunk in self._attempt_stream(self.cfg.fallback_model, messages, timeout_first_token=12.0):
+            async for chunk in self._attempt_stream(
+                self.cfg.fallback_model, messages, timeout_first_token=12.0
+            ):
                 yield chunk
-        except (litellm.exceptions.APIError, TimeoutError, ConnectionError, OSError, RuntimeError, ValueError) as exc:
+        except (
+            litellm.exceptions.APIError,
+            TimeoutError,
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as exc:
             logger.error("Fallback LLM (%s) also failed: %s", self.cfg.fallback_model, exc)
             yield "<emo=sad> Ой, у меня что-то с сетью. Не могу сейчас ответить."
 

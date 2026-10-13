@@ -33,18 +33,20 @@ MOOD_FACTORS: dict[Mood, float] = {
 
 INITIATIVE_SEEDS: list[str] = [
     "tease_screen",
+    "react_to_coding",
+    "comment_night_work",
+    "joke_or_banter",
     "ask_question",
     "random_thought",
     "recall_memory",
-    "complain_bored",
     "suggest_break",
-    "ask_plans",
 ]
 
 
 @dataclass(slots=True)
 class InitiativeDecision:
     """Represents the outcome of an initiative evaluation tick."""
+
     should_speak: bool
     reason: str
     seed: str = ""
@@ -149,14 +151,16 @@ class InitiativeManager:
 
     def calculate_hazard_rate(self, dt: float) -> tuple[float, float]:
         """Calculate Poisson hazard rate probability p_tick for step dt."""
-        backoff_mult = self.config.backoff_factor ** self.ignored_count
+        backoff_mult = self.config.backoff_factor**self.ignored_count
         max_mult = self.config.max_backoff_s / max(1.0, self.config.mean_interval_s)
         backoff = min(backoff_mult, max_mult)
 
         mood_factor = MOOD_FACTORS.get(self.mood, 1.0)
         energy_factor = max(0.2, self.energy)
 
-        current_mean_interval = (self.config.mean_interval_s * backoff * mood_factor) / energy_factor
+        current_mean_interval = (
+            self.config.mean_interval_s * backoff * mood_factor
+        ) / energy_factor
         lam = 1.0 / max(1.0, current_mean_interval)
         p_tick = 1.0 - math.exp(-lam * dt)
 
@@ -223,8 +227,9 @@ class InitiativeManager:
         # Trigger on interesting window switch
         if active_app and active_app != self.last_app:
             self.last_app = active_app
+            self.ignored_count = 0
             last_comment = self.last_app_comment_ts.get(active_app, 0.0)
-            if (now - last_comment) > 600.0:  # 10 min cooldown per app
+            if (now - last_comment) > 90.0:  # 90s cooldown per app
                 self.last_app_comment_ts[active_app] = now
                 seed = "tease_screen"
                 reason = f"app_switch_trigger ({active_app})"
@@ -237,7 +242,9 @@ class InitiativeManager:
 
         if roll < p_tick:
             seed = random.choice(INITIATIVE_SEEDS)
-            reason = f"hazard_prob_hit (p={p_tick:.4f}, mean={current_interval:.1f}s, roll={roll:.4f})"
+            reason = (
+                f"hazard_prob_hit (p={p_tick:.4f}, mean={current_interval:.1f}s, roll={roll:.4f})"
+            )
             logger.info("[Initiative] Triggered proactive turn: %s, seed=%s", reason, seed)
             return InitiativeDecision(True, reason, seed=seed)
 

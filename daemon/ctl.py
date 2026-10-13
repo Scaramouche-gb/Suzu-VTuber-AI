@@ -12,7 +12,9 @@ from typing import Any
 DEFAULT_SERVER_URL = "http://127.0.0.1:8765"
 
 
-def _request_json(url: str, method: str = "GET", data: dict[str, Any] | None = None) -> dict[str, Any]:
+def _request_json(
+    url: str, method: str = "GET", data: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """Execute HTTP request to daemon API and parse JSON response."""
     encoded_data = json.dumps(data).encode("utf-8") if data is not None else None
     headers = {"Content-Type": "application/json"} if data is not None else {}
@@ -23,7 +25,10 @@ def _request_json(url: str, method: str = "GET", data: dict[str, Any] | None = N
             content = resp.read().decode("utf-8")
             return json.loads(content)
     except urllib.error.URLError as exc:
-        print(f"[vtuberctl Error] Cannot connect to daemon at {DEFAULT_SERVER_URL}: {exc}", file=sys.stderr)
+        print(
+            f"[vtuberctl Error] Cannot connect to daemon at {DEFAULT_SERVER_URL}: {exc}",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
 
@@ -39,24 +44,34 @@ def cmd_status(_args: argparse.Namespace) -> None:
     print(f"Blind Mode:   {'ON' if res.get('blind') else 'OFF'}")
     print(f"Active App:   {res.get('active_app', 'none')} ({res.get('active_title', '')})")
     print(f"Screen Desc:  {res.get('screen_context', 'none')}")
-    print(f"Today Cost:   ${res.get('daily_cost', 0.0):.4f} / ${res.get('max_usd_per_day', 0.0):.2f}")
+    print(
+        f"Today Cost:   ${res.get('daily_cost', 0.0):.4f} / ${res.get('max_usd_per_day', 0.0):.2f}"
+    )
 
 
 def cmd_mute(args: argparse.Namespace) -> None:
     state = args.state.lower() in ("on", "1", "true")
-    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "mute", "args": {"enabled": state}})
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "mute", "args": {"enabled": state}}
+    )
     print(f"Microphone mute set to: {'ON' if state else 'OFF'} ({res.get('status')})")
 
 
 def cmd_blind(args: argparse.Namespace) -> None:
     state = args.state.lower() in ("on", "1", "true")
-    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "blind", "args": {"enabled": state}})
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command",
+        "POST",
+        {"command": "blind", "args": {"enabled": state}},
+    )
     print(f"Vision blind mode set to: {'ON' if state else 'OFF'} ({res.get('status')})")
 
 
 def cmd_dnd(args: argparse.Namespace) -> None:
     state = args.state.lower() in ("on", "1", "true")
-    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "dnd", "args": {"enabled": state}})
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "dnd", "args": {"enabled": state}}
+    )
     print(f"Do Not Disturb set to: {'ON' if state else 'OFF'} ({res.get('status')})")
 
 
@@ -65,19 +80,25 @@ def cmd_say(args: argparse.Namespace) -> None:
     if not text:
         print("[vtuberctl Error] Missing text argument to say", file=sys.stderr)
         sys.exit(1)
-    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "say", "args": {"text": text}})
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "say", "args": {"text": text}}
+    )
     print(f"Dispatched say: «{text}» ({res.get('status')})")
 
 
 def cmd_look(args: argparse.Namespace) -> None:
     target = args.target.lower()
-    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "look", "args": {"target": target}})
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "look", "args": {"target": target}}
+    )
     print(f"Look target set to: {target} ({res.get('status')})")
 
 
 def cmd_mood(args: argparse.Namespace) -> None:
     mood = args.mood.lower()
-    res = _request_json(f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "mood", "args": {"mood": mood}})
+    res = _request_json(
+        f"{DEFAULT_SERVER_URL}/api/command", "POST", {"command": "mood", "args": {"mood": mood}}
+    )
     print(f"Mood set to: {mood} ({res.get('status')})")
 
 
@@ -112,7 +133,10 @@ def cmd_memory(args: argparse.Namespace) -> None:
 
     elif sub == "forget":
         if not args.fact_id:
-            print("[vtuberctl Error] Specify fact ID to forget (e.g. vtuberctl memory forget 3)", file=sys.stderr)
+            print(
+                "[vtuberctl Error] Specify fact ID to forget (e.g. vtuberctl memory forget 3)",
+                file=sys.stderr,
+            )
             sys.exit(1)
         res = _request_json(
             f"{DEFAULT_SERVER_URL}/api/memory/forget",
@@ -127,7 +151,9 @@ def cmd_memory(args: argparse.Namespace) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vtuberctl", description="Control client for Suzu AI-VTuber daemon")
+    parser = argparse.ArgumentParser(
+        prog="vtuberctl", description="Control client for Suzu AI-VTuber daemon"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # status
@@ -173,7 +199,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # memory
     p_mem = subparsers.add_parser("memory", help="Inspect and manage persistent memory")
-    p_mem.add_argument("subaction", choices=["list", "forget", "wipe"], help="list, forget <id>, or wipe")
+    p_mem.add_argument(
+        "subaction", choices=["list", "forget", "wipe"], help="list, forget <id>, or wipe"
+    )
     p_mem.add_argument("fact_id", type=int, nargs="?", help="Fact ID (for forget)")
     p_mem.set_defaults(func=cmd_memory)
 

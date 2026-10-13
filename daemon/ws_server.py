@@ -68,16 +68,24 @@ class WebSocketServer:
         logger.info("Renderer connected via WebSocket (%d active clients)", len(self._clients))
 
         # Send initial config and state
-        await ws.send_str(json.dumps({
-            "type": "config",
-            "scale": self.cfg.avatar.scale,
-            "y_offset": self.cfg.avatar.y_offset,
-            "fps": self.cfg.avatar.fps,
-        }))
-        await ws.send_str(json.dumps({
-            "type": "state",
-            "value": self.current_state,
-        }))
+        await ws.send_str(
+            json.dumps(
+                {
+                    "type": "config",
+                    "scale": self.cfg.avatar.scale,
+                    "y_offset": self.cfg.avatar.y_offset,
+                    "fps": self.cfg.avatar.fps,
+                }
+            )
+        )
+        await ws.send_str(
+            json.dumps(
+                {
+                    "type": "state",
+                    "value": self.current_state,
+                }
+            )
+        )
 
         try:
             async for msg in ws:
@@ -144,7 +152,9 @@ async def handle_api_status(request: web.Request) -> web.Response:
         "active_title": vision.active_title if vision else "",
         "screen_context": vision.screen_context if vision else "",
         "daily_cost": conductor.llm.budget.daily_spent if (conductor and conductor.llm) else 0.0,
-        "max_usd_per_day": conductor.llm.cfg.max_usd_per_day if (conductor and conductor.llm) else 0.0,
+        "max_usd_per_day": conductor.llm.cfg.max_usd_per_day
+        if (conductor and conductor.llm)
+        else 0.0,
     }
     return web.json_response(status_data)
 
@@ -176,17 +186,21 @@ async def handle_api_memory(request: web.Request) -> web.Response:
 
     facts = await memory.list_facts()
     episodes = await memory.get_recent_episodes(limit=5)
-    return web.json_response({
-        "facts": facts,
-        "episodes": [{"id": e.id, "summary": e.summary} for e in episodes],
-    })
+    return web.json_response(
+        {
+            "facts": facts,
+            "episodes": [{"id": e.id, "summary": e.summary} for e in episodes],
+        }
+    )
 
 
 async def handle_api_memory_forget(request: web.Request) -> web.Response:
     """REST API endpoint to delete a fact by ID."""
     memory = request.app.get("memory")
     if not memory:
-        return web.json_response({"status": "error", "message": "Memory not configured"}, status=400)
+        return web.json_response(
+            {"status": "error", "message": "Memory not configured"}, status=400
+        )
 
     try:
         body = await request.json()
@@ -202,7 +216,9 @@ async def handle_api_memory_wipe(request: web.Request) -> web.Response:
     """REST API endpoint to wipe all persistent memory."""
     memory = request.app.get("memory")
     if not memory:
-        return web.json_response({"status": "error", "message": "Memory not configured"}, status=400)
+        return web.json_response(
+            {"status": "error", "message": "Memory not configured"}, status=400
+        )
 
     await memory.wipe_memory()
     return web.json_response({"status": "ok", "wiped": True})
@@ -227,6 +243,7 @@ def setup_routes(app: web.Application, ws_server: WebSocketServer) -> None:
     if RENDERER_DIST_DIR.exists():
         index_file = RENDERER_DIST_DIR / "index.html"
         if index_file.exists():
+
             async def handle_root(request: web.Request) -> web.FileResponse:
                 return web.FileResponse(index_file)
 

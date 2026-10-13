@@ -85,7 +85,9 @@ async def cors_middleware(request: web.Request, handler: Any) -> web.Response:
             response = ex
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Headers"] = (
+        "Content-Type, Authorization, X-Requested-With"
+    )
     return response
 
 
@@ -111,7 +113,9 @@ async def text_repl_loop(conductor: Conductor, stop_event: asyncio.Event) -> Non
 
     while not stop_event.is_set():
         try:
-            line = await asyncio.to_thread(input, f"[{conductor.llm.cfg.chat_model.split('/')[-1]}] Вы: ")
+            line = await asyncio.to_thread(
+                input, f"[{conductor.llm.cfg.chat_model.split('/')[-1]}] Вы: "
+            )
             text = line.strip()
             if not text:
                 continue
@@ -222,10 +226,14 @@ async def run_server(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Suzu AI-VTuber Daemon")
     parser.add_argument("--config", type=str, default="config.toml", help="Path to config.toml")
-    parser.add_argument("--text", action="store_true", help="Run in interactive text mode (Phase 2)")
+    parser.add_argument(
+        "--text", action="store_true", help="Run in interactive text mode (Phase 2)"
+    )
     parser.add_argument("--dry-run-llm", action="store_true", help="Mock LLM responses for testing")
     parser.add_argument("--no-mic", action="store_true", help="Disable microphone input capture")
-    parser.add_argument("--overlay", action="store_true", help="Launch desktop transparent overlay window")
+    parser.add_argument(
+        "--overlay", action="store_true", help="Launch desktop transparent overlay window"
+    )
     return parser.parse_args()
 
 

@@ -31,9 +31,7 @@ class ServerConfig(BaseModel):
     @classmethod
     def validate_localhost_only(cls, v: str) -> str:
         if v not in ("127.0.0.1", "localhost"):
-            raise ValueError(
-                f"Security violation: server must only bind to 127.0.0.1, got '{v}'"
-            )
+            raise ValueError(f"Security violation: server must only bind to 127.0.0.1, got '{v}'")
         return v
 
 

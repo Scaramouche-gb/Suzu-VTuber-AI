@@ -62,6 +62,13 @@ class Conductor:
         self._initiative_task: asyncio.Task[None] | None = None
         self._utterance_counter = 0
 
+        # Desktop audio sequential playback queue
+        self._desktop_audio_queue: asyncio.Queue[tuple[str, Path]] = asyncio.Queue()
+        self._current_mpv_proc: asyncio.subprocess.Process | None = None
+        self._desktop_audio_task: asyncio.Task[None] = asyncio.create_task(
+            self._desktop_audio_worker()
+        )
+
         # Subscribe to bus events
         self.bus.subscribe(Interrupt, self.handle_interrupt)
         self.bus.subscribe(PlaybackStarted, self.handle_playback_started)
@@ -76,6 +83,9 @@ class Conductor:
 
     async def close(self) -> None:
         """Clean up background tasks and persistent memory."""
+        self._interrupt_desktop_audio()
+        if self._desktop_audio_task and not self._desktop_audio_task.done():
+            self._desktop_audio_task.cancel()
         if self._initiative_task and not self._initiative_task.done():
             self._initiative_task.cancel()
         if self._current_gen_task and not self._current_gen_task.done():
@@ -93,6 +103,7 @@ class Conductor:
     async def handle_interrupt(self, event: Interrupt) -> None:
         """Cancel ongoing generation and speech on user barge-in."""
         logger.info("Interrupt triggered: %s", event.reason)
+        self._interrupt_desktop_audio()
         if self._current_gen_task and not self._current_gen_task.done():
             self._current_gen_task.cancel()
             self._current_gen_task = None
@@ -115,7 +126,9 @@ class Conductor:
         if cmd == "click":
             region = args.get("region", "body")
             if region == "head":
-                await self.ws.broadcast({"type": "emotion", "name": "surprised", "intensity": 0.8, "hold_ms": 1500})
+                await self.ws.broadcast(
+                    {"type": "emotion", "name": "surprised", "intensity": 0.8, "hold_ms": 1500}
+                )
                 await self.ws.broadcast({"type": "gesture", "name": "nod"})
             else:
                 await self.ws.broadcast({"type": "gesture", "name": "shrug"})
@@ -159,6 +172,7 @@ class Conductor:
     async def handle_user_speech_start(self, event: UserSpeechStart) -> None:
         """User started speaking; immediately interrupt active speech and transition to listening."""
         self.initiative.on_user_speech_start()
+        self._interrupt_desktop_audio()
         if self.state in ("speaking", "thinking"):
             await self.bus.publish(Interrupt(reason="user_speech_start"))
         self.set_state("listening")
@@ -186,7 +200,9 @@ class Conductor:
 
     async def handle_screen_change(self, event: ScreenChange) -> None:
         """Handle noticeable screen content changes."""
-        logger.debug("Conductor received ScreenChange: %s (%s)", event.active_app, event.active_title)
+        logger.debug(
+            "Conductor received ScreenChange: %s (%s)", event.active_app, event.active_title
+        )
 
     async def process_user_turn(
         self,
@@ -205,7 +221,16 @@ class Conductor:
 
         # Vision Layer 2: Attach screen frame if user asks about screen
         if image_base64 is None and self.vision and not self.vision.blind_mode:
-            keywords = ("экран", "смотри", "видишь", "что тут", "что здесь", "ошибка", "взгляни", "глянь")
+            keywords = (
+                "экран",
+                "смотри",
+                "видишь",
+                "что тут",
+                "что здесь",
+                "ошибка",
+                "взгляни",
+                "глянь",
+            )
             if any(kw in user_text.lower() for kw in keywords):
                 latest_frame = self.vision.get_latest_frame()
                 if latest_frame:
@@ -242,13 +267,14 @@ class Conductor:
         recent_inits = "; ".join(self.initiative.recent_initiatives[-3:]) or "нет"
 
         proactive_user_prompt = (
-            f"КОНТЕКСТ: время {now_str}, активное приложение: {active_app}, "
-            f"описание экрана: {screen_desc}, сколько молчим: {silence_min} мин, "
+            f"КОНТЕКСТ: время {now_str}, активное приложение/окно: {active_app}, "
+            f"состояние экрана: {screen_desc}, молчим: {silence_min} мин, "
             f"твоё настроение: {self.initiative.mood.value}.\n"
-            f"Последние твои реплики по инициативе: [{recent_inits}] (НЕ ПОВТОРЯЙСЯ).\n"
-            f"ЗАДАЧА: реши, стоит ли сейчас что-то сказать. Если да, скажи одну короткую реплику "
-            f"(1-2 предложения) в своём характере. Если нет, выведи только <silent>.\n"
-            f"Тема подсказка: {seed}"
+            f"Последние твои реплики: [{recent_inits}] (НЕ ПОВТОРЯЙСЯ).\n"
+            f"Тема: {seed}.\n"
+            f"ЗАДАЧА: Сделай живой, забавный, язвительный или заботливый комментарий (1-2 коротких предложения вслух) "
+            f"о том, что Макс сейчас делает за компом (Zed, код, терминал, браузер, ночь), либо подколи или спроси что-то интересное. "
+            f"Обязательно ставь теги эмоций и жестов в начале (например, <emo=playful:0.9><gst=nod>). Если момент совсем неподходящий, выведи <silent>."
         )
 
         self._current_gen_task = asyncio.create_task(
@@ -275,22 +301,26 @@ class Conductor:
         self.set_state("thinking")
         t_turn_start = start_ts or time.time()
 
+        facts_list = None
+        episodes_list = None
+        if self.memory:
+            fact_records = await self.memory.get_facts(limit=20)
+            facts_list = [f.text for f in fact_records]
+            episode_records = await self.memory.get_recent_episodes(limit=5)
+            episodes_list = [e.summary for e in episode_records]
+
         if is_proactive:
-            # Proactive uses fast model with direct instructions
-            messages = [
-                {"role": "system", "content": f"{self.llm.persona_text}\n\n{self.llm.rules_text}".strip()},
-                {"role": "user", "content": user_text},
-            ]
+            # Proactive turns have access to memory facts and recent context!
+            messages = self.llm.build_messages(
+                user_message=user_text,
+                history=self.history[-6:],
+                context_info=context_info,
+                facts=facts_list,
+                episodes=episodes_list,
+                image_base64=image_base64,
+            )
             target_model = self.llm.cfg.fast_model
         else:
-            facts_list = None
-            episodes_list = None
-            if self.memory:
-                fact_records = await self.memory.get_facts(limit=20)
-                facts_list = [f.text for f in fact_records]
-                episode_records = await self.memory.get_recent_episodes(limit=5)
-                episodes_list = [e.summary for e in episode_records]
-
             messages = self.llm.build_messages(
                 user_message=user_text,
                 history=self.history[-12:],
@@ -348,14 +378,18 @@ class Conductor:
                     self.history.append({"role": "assistant", "content": reply_str})
                     self.initiative.on_avatar_spoken(is_proactive=True, text=reply_str)
                     if self.memory:
-                        await self.memory.record_message(role="assistant", text=reply_str, kind="proactive")
+                        await self.memory.record_message(
+                            role="assistant", text=reply_str, kind="proactive"
+                        )
                 else:
                     self.history.append({"role": "user", "content": user_text})
                     self.history.append({"role": "assistant", "content": reply_str})
                     self.initiative.on_avatar_spoken(is_proactive=False, text=reply_str)
                     if self.memory:
                         await self.memory.record_message(role="user", text=user_text, kind="user")
-                        await self.memory.record_message(role="assistant", text=reply_str, kind="chat")
+                        await self.memory.record_message(
+                            role="assistant", text=reply_str, kind="chat"
+                        )
                         asyncio.create_task(self.memory.maybe_summarize(self.llm))
 
                 if self.stt:
@@ -363,7 +397,11 @@ class Conductor:
 
                 if first_audio_dispatched:
                     llm_token_ms = (t_first_token - t_turn_start) * 1000.0 if t_first_token else 0.0
-                    tts_audio_ms = (t_first_audio - t_first_token) * 1000.0 if (t_first_audio and t_first_token) else 0.0
+                    tts_audio_ms = (
+                        (t_first_audio - t_first_token) * 1000.0
+                        if (t_first_audio and t_first_token)
+                        else 0.0
+                    )
                     total_ms = (t_first_audio - t_turn_start) * 1000.0
                     logger.info(
                         "[Latency Budget] VAD+STT: %.0fms | LLM 1st Token: %.0fms | TTS 1st Audio: %.0fms | Total: %.0fms",
@@ -392,11 +430,13 @@ class Conductor:
 
         if isinstance(tag, EmotionTag):
             logger.debug("[Tag] Emotion: %s (%s)", tag.name, tag.intensity)
-            await self.ws.broadcast({
-                "type": "emotion",
-                "name": tag.name,
-                "intensity": tag.intensity,
-            })
+            await self.ws.broadcast(
+                {
+                    "type": "emotion",
+                    "name": tag.name,
+                    "intensity": tag.intensity,
+                }
+            )
             splitter.add_tag(tag)
 
         elif isinstance(tag, GestureTag):
@@ -437,7 +477,13 @@ class Conductor:
                 if audio_bytes:
                     save_audio_file(utt_id, audio_bytes)
                     audio_url = f"/audio/{utt_id}.mp3"
-            except (aiohttp.ClientError, OSError, RuntimeError, ConnectionError, TimeoutError) as exc:
+            except (
+                aiohttp.ClientError,
+                OSError,
+                RuntimeError,
+                ConnectionError,
+                TimeoutError,
+            ) as exc:
                 logger.warning("TTS synthesis failed for utterance %s: %s", utt_id, exc)
 
         say_payload: dict[str, Any] = {
@@ -453,26 +499,65 @@ class Conductor:
 
         await self.ws.broadcast(say_payload)
 
+        if self.stt and chunk.text:
+            self.stt.set_last_avatar_phrase(chunk.text)
+
         # Direct desktop audio playback via PipeWire (guarantees voice output regardless of browser state)
         if audio_url:
             audio_path = get_audio_path(utt_id)
             if audio_path.exists():
-                asyncio.create_task(self._play_desktop_audio(audio_path))
+                await self._desktop_audio_queue.put((utt_id, audio_path))
 
-    async def _play_desktop_audio(self, audio_path: Path) -> None:
-        """Play synthesized audio directly through PipeWire when no web client is connected."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "mpv",
-                "--no-video",
-                "--really-quiet",
-                str(audio_path),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await proc.wait()
-        except (OSError, RuntimeError) as exc:
-            logger.debug("Desktop audio fallback failed: %s", exc)
+    async def _desktop_audio_worker(self) -> None:
+        """Sequential playback worker ensuring sentences play one by one without overlap."""
+        while True:
+            try:
+                utt_id, audio_path = await self._desktop_audio_queue.get()
+            except asyncio.CancelledError:
+                break
+
+            try:
+                if audio_path.exists():
+                    self.set_state("speaking")
+                    await self.bus.publish(PlaybackStarted(utterance_id=utt_id))
+                    proc = await asyncio.create_subprocess_exec(
+                        "mpv",
+                        "--no-video",
+                        "--really-quiet",
+                        str(audio_path),
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    self._current_mpv_proc = proc
+                    await proc.wait()
+                    self._current_mpv_proc = None
+                    await self.bus.publish(PlaybackEnded(utterance_id=utt_id))
+            except asyncio.CancelledError:
+                self._desktop_audio_queue.task_done()
+                break
+            except (OSError, RuntimeError) as exc:
+                logger.debug("Desktop audio playback error: %s", exc)
+            finally:
+                self._desktop_audio_queue.task_done()
+                if self._desktop_audio_queue.empty() and self.state == "speaking":
+                    self.set_state("idle")
+
+    def _interrupt_desktop_audio(self) -> None:
+        """Immediately stop currently playing audio and discard queued sentences."""
+        while not self._desktop_audio_queue.empty():
+            try:
+                self._desktop_audio_queue.get_nowait()
+                self._desktop_audio_queue.task_done()
+            except (asyncio.QueueEmpty, ValueError):
+                break
+        if self._current_mpv_proc and self._current_mpv_proc.returncode is None:
+            try:
+                self._current_mpv_proc.terminate()
+            except OSError:
+                pass
+            self._current_mpv_proc = None
+        if self.state == "speaking":
+            self.set_state("idle")
 
     async def _initiative_loop(self) -> None:
         """Periodic background ticker evaluating initiative and idle liveliness."""
@@ -490,7 +575,9 @@ class Conductor:
         budget_exceeded = self.llm.budget.is_exceeded()
         is_user_speaking = self.state == "listening"
         is_avatar_speaking = self.state == "speaking"
-        is_llm_busy = self.state == "thinking" or (self._current_gen_task is not None and not self._current_gen_task.done())
+        is_llm_busy = self.state == "thinking" or (
+            self._current_gen_task is not None and not self._current_gen_task.done()
+        )
 
         active_app = self.vision.active_app if self.vision else ""
         screen_context = self.vision.screen_context if self.vision else ""
@@ -505,7 +592,9 @@ class Conductor:
             screen_context=screen_context,
         )
 
-        logger.debug("[Initiative Tick] Speak: %s, Reason: %s", decision.should_speak, decision.reason)
+        logger.debug(
+            "[Initiative Tick] Speak: %s, Reason: %s", decision.should_speak, decision.reason
+        )
 
         if decision.should_speak:
             await self.process_proactive_turn(seed=decision.seed)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+from collections import deque
 from typing import Any
 
 import numpy as np
@@ -43,15 +44,24 @@ class WhisperSTT:
         self.cfg = cfg
         self._model: WhisperModel | None = None
         self._last_avatar_phrase = ""
+        self._recent_avatar_phrases: deque[str] = deque(maxlen=12)
 
     def set_last_avatar_phrase(self, phrase: str) -> None:
         """Track last avatar utterance to prevent self-echo."""
-        self._last_avatar_phrase = phrase.strip().lower()
+        clean = phrase.strip().lower()
+        if clean:
+            self._last_avatar_phrase = clean
+            self._recent_avatar_phrases.append(clean)
 
     def load_model(self) -> WhisperModel:
         """Lazy load faster-whisper model."""
         if self._model is None:
-            logger.info("Loading faster-whisper model '%s' on %s (%s)...", self.cfg.model, self.cfg.device, self.cfg.compute_type)
+            logger.info(
+                "Loading faster-whisper model '%s' on %s (%s)...",
+                self.cfg.model,
+                self.cfg.device,
+                self.cfg.compute_type,
+            )
             try:
                 self._model = WhisperModel(
                     self.cfg.model,
@@ -59,7 +69,12 @@ class WhisperSTT:
                     compute_type=self.cfg.compute_type,
                 )
             except (RuntimeError, ValueError, OSError) as exc:
-                logger.warning("Failed to load Whisper on %s (%s): %s. Falling back to cpu/int8", self.cfg.device, self.cfg.compute_type, exc)
+                logger.warning(
+                    "Failed to load Whisper on %s (%s): %s. Falling back to cpu/int8",
+                    self.cfg.device,
+                    self.cfg.compute_type,
+                    exc,
+                )
                 self._model = WhisperModel(
                     self.cfg.model,
                     device="cpu",
@@ -87,7 +102,11 @@ class WhisperSTT:
             )
             segment_list = list(segments)
         except (RuntimeError, OSError) as exc:
-            logger.warning("Whisper transcription failed on %s: %s. Falling back to cpu/int8", self.cfg.device, exc)
+            logger.warning(
+                "Whisper transcription failed on %s: %s. Falling back to cpu/int8",
+                self.cfg.device,
+                exc,
+            )
             self._model = WhisperModel(self.cfg.model, device="cpu", compute_type="int8")
             segments, info = self._model.transcribe(
                 audio,
@@ -107,13 +126,25 @@ class WhisperSTT:
 
             # 1. Metric filtering
             if segment.no_speech_prob > 0.65:
-                logger.debug("STT: Discarded segment due to no_speech_prob (%.2f): '%s'", segment.no_speech_prob, text)
+                logger.debug(
+                    "STT: Discarded segment due to no_speech_prob (%.2f): '%s'",
+                    segment.no_speech_prob,
+                    text,
+                )
                 continue
             if segment.avg_logprob < -1.1:
-                logger.debug("STT: Discarded segment due to low avg_logprob (%.2f): '%s'", segment.avg_logprob, text)
+                logger.debug(
+                    "STT: Discarded segment due to low avg_logprob (%.2f): '%s'",
+                    segment.avg_logprob,
+                    text,
+                )
                 continue
             if segment.compression_ratio > 2.4:
-                logger.debug("STT: Discarded repetitive hallucination (compression=%.2f): '%s'", segment.compression_ratio, text)
+                logger.debug(
+                    "STT: Discarded repetitive hallucination (compression=%.2f): '%s'",
+                    segment.compression_ratio,
+                    text,
+                )
                 continue
 
             # 2. Blacklist check
@@ -133,13 +164,30 @@ class WhisperSTT:
             return ""
 
         # 4. Self-echo rejection
-        if self._last_avatar_phrase:
-            similarity = difflib.SequenceMatcher(None, result_text.lower(), self._last_avatar_phrase).ratio()
-            if similarity > 0.72:
-                logger.info("STT: Discarded acoustic self-echo (similarity=%.2f): '%s'", similarity, result_text)
+        lower_result = result_text.lower()
+        for phrase in self._recent_avatar_phrases:
+            if not phrase:
+                continue
+            similarity = difflib.SequenceMatcher(None, lower_result, phrase).ratio()
+            if (
+                similarity > 0.65
+                or lower_result in phrase
+                or (len(lower_result) > 10 and phrase in lower_result)
+            ):
+                logger.info(
+                    "STT: Discarded acoustic self-echo (similarity=%.2f): '%s' ~= '%s'",
+                    similarity,
+                    result_text,
+                    phrase,
+                )
                 return ""
 
-        logger.info("STT recognized: '%s' (lang: %s, prob: %.2f)", result_text, info.language, info.language_probability)
+        logger.info(
+            "STT recognized: '%s' (lang: %s, prob: %.2f)",
+            result_text,
+            info.language,
+            info.language_probability,
+        )
         return result_text
 
 

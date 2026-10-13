@@ -54,7 +54,9 @@ class BaseTTSEngine(abc.ABC):
     """Abstract base class for TTS synthesis engines."""
 
     @abc.abstractmethod
-    async def synthesize(self, text: str, emotion: str = "neutral", intensity: float = 1.0) -> bytes:
+    async def synthesize(
+        self, text: str, emotion: str = "neutral", intensity: float = 1.0
+    ) -> bytes:
         """Synthesize text to audio bytes (mp3 or wav)."""
 
 
@@ -92,7 +94,9 @@ class EdgeTTSEngine(BaseTTSEngine):
 
         return rate, pitch
 
-    async def synthesize(self, text: str, emotion: str = "neutral", intensity: float = 1.0) -> bytes:
+    async def synthesize(
+        self, text: str, emotion: str = "neutral", intensity: float = 1.0
+    ) -> bytes:
         clean_text = self.pronounce.apply(text).strip()
         if not clean_text:
             return b""
@@ -186,20 +190,71 @@ class SileroTTSEngine(BaseTTSEngine):
             self._model = model
         return self._model
 
-    async def synthesize(self, text: str, emotion: str = "neutral", intensity: float = 1.0) -> bytes:
+    async def synthesize(
+        self, text: str, emotion: str = "neutral", intensity: float = 1.0
+    ) -> bytes:
         clean_text = self.pronounce.apply(text).strip()
         if not clean_text:
             return b""
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._sync_synthesize, clean_text)
+        return await loop.run_in_executor(
+            None, self._sync_synthesize, clean_text, emotion, intensity
+        )
 
-    def _sync_synthesize(self, text: str) -> bytes:
+    def _sync_synthesize(
+        self, text: str, emotion: str = "neutral", intensity: float = 1.0
+    ) -> bytes:
         try:
             model = self._get_model()
             audio = model.apply_tts(text=text, speaker="kseniya", sample_rate=24000)
             pcm_data = (audio.numpy() * 32767).astype(np.int16).tobytes()
 
-            shift = getattr(self.cfg, "pitch_shift", 1.15)
+            base_shift = getattr(self.cfg, "pitch_shift", 1.15)
+            scale = min(1.0, max(0.0, intensity))
+            emo = (emotion or "neutral").lower()
+
+            shift = base_shift
+            tempo_factor = 1.0
+            volume = 1.20
+            eq = ""
+
+            if emo in ("happy", "joy"):
+                shift = base_shift + 0.08 * scale
+                tempo_factor = 1.0 + 0.08 * scale
+                volume = 1.25
+                eq = ",equalizer=f=3200:width_type=h:width=1200:g=2.5"
+            elif emo in ("playful", "silly", "smug"):
+                shift = base_shift + 0.09 * scale
+                tempo_factor = 1.0 + 0.07 * scale
+                volume = 1.25
+            elif emo in ("surprised", "excited"):
+                shift = base_shift + 0.12 * scale
+                tempo_factor = 1.0 + 0.10 * scale
+                volume = 1.30
+            elif emo in ("angry", "annoyed", "pout"):
+                shift = base_shift - 0.04 * scale
+                tempo_factor = 1.0 + 0.12 * scale
+                volume = 1.35
+                eq = ",equalizer=f=1200:width_type=h:width=500:g=3.0"
+            elif emo in ("sad", "worried", "sorrow"):
+                shift = base_shift - 0.06 * scale
+                tempo_factor = 1.0 - 0.12 * scale
+                volume = 1.08
+            elif emo in ("sleepy", "tired"):
+                shift = base_shift - 0.05 * scale
+                tempo_factor = 1.0 - 0.15 * scale
+                volume = 1.05
+            elif emo in ("relaxed", "calm"):
+                shift = base_shift - 0.02 * scale
+                tempo_factor = 1.0 - 0.04 * scale
+                volume = 1.15
+            elif emo in ("curious", "thinking", "doubt"):
+                shift = base_shift + 0.04 * scale
+                tempo_factor = 1.02
+                volume = 1.20
+
+            final_tempo = max(0.6, min(1.8, (1.0 / shift) * tempo_factor))
+
             cmd = [
                 "ffmpeg",
                 "-y",
@@ -212,7 +267,7 @@ class SileroTTSEngine(BaseTTSEngine):
                 "-i",
                 "pipe:0",
                 "-af",
-                f"asetrate=24000*{shift},aresample=24000,atempo={1.0 / shift},volume=1.2",
+                f"asetrate=24000*{shift:.3f},aresample=24000,atempo={final_tempo:.3f},volume={volume:.2f}{eq}",
                 "-f",
                 "mp3",
                 "pipe:1",
@@ -231,7 +286,9 @@ class MockTTSEngine(BaseTTSEngine):
     def __init__(self) -> None:
         pass
 
-    async def synthesize(self, text: str, emotion: str = "neutral", intensity: float = 1.0) -> bytes:
+    async def synthesize(
+        self, text: str, emotion: str = "neutral", intensity: float = 1.0
+    ) -> bytes:
         await asyncio.sleep(0.05)
         # 1-second silence/beep header in MP3 or dummy bytes
         return b"\xff\xfb\x90\x64\x00\x00\x00\x00" * 64

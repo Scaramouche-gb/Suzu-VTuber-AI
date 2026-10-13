@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class Event:
     """Base event with creation timestamp."""
+
     timestamp: float = field(default_factory=time.time)
 
 
@@ -26,6 +27,7 @@ class UserSpeechStart(Event):
 @dataclass(slots=True)
 class UserSpeech(Event):
     """Fired when user phrase ends and speech chunk is captured."""
+
     audio_data: Any = None
     duration_s: float = 0.0
     text: str = ""
@@ -34,6 +36,7 @@ class UserSpeech(Event):
 @dataclass(slots=True)
 class ScreenChange(Event):
     """Fired when screen content changes noticeably."""
+
     image_bytes: bytes = b""
     diff_ratio: float = 0.0
     active_app: str = ""
@@ -43,12 +46,14 @@ class ScreenChange(Event):
 @dataclass(slots=True)
 class Tick(Event):
     """Periodic tick for initiative and state checks."""
+
     dt: float = 1.0
 
 
 @dataclass(slots=True)
 class UserCommand(Event):
     """Fired when CLI or control interface sends a command."""
+
     command: str = ""
     args: dict[str, Any] = field(default_factory=dict)
 
@@ -56,18 +61,21 @@ class UserCommand(Event):
 @dataclass(slots=True)
 class PlaybackStarted(Event):
     """Fired when renderer begins audio playback."""
+
     utterance_id: str = ""
 
 
 @dataclass(slots=True)
 class PlaybackEnded(Event):
     """Fired when renderer finishes audio playback."""
+
     utterance_id: str = ""
 
 
 @dataclass(slots=True)
 class Interrupt(Event):
     """Fired to barge-in or cancel active speaking/thinking."""
+
     reason: str = "barge-in"
 
 
