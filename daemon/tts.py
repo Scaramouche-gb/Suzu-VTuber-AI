@@ -11,9 +11,12 @@ import subprocess
 import time
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 import edge_tts
+import numpy as np
+import torch
 
 from daemon.config import TTSConfig
 
@@ -61,6 +64,7 @@ class EdgeTTSEngine(BaseTTSEngine):
     def __init__(self, cfg: TTSConfig, dict_path: Path | None = None) -> None:
         self.cfg = cfg
         self.pronounce = PronunciationDictionary(dict_path)
+        self._silero_fallback: SileroTTSEngine | None = None
 
     def _get_emotion_modulation(self, emotion: str, intensity: float) -> tuple[str, str]:
         """Compute rate and pitch offsets based on emotion."""
@@ -130,7 +134,10 @@ class EdgeTTSEngine(BaseTTSEngine):
                     await asyncio.sleep(0.3 * (attempt + 1))
 
         if last_error:
-            logger.warning("Edge TTS failed after 3 attempts: %s", last_error)
+            logger.warning("Edge TTS failed (%s). Falling back to local Silero TTS...", last_error)
+            if self._silero_fallback is None:
+                self._silero_fallback = SileroTTSEngine(self.cfg)
+            return await self._silero_fallback.synthesize(text, emotion, intensity)
         return b""
 
     def _apply_pitch_shift(self, audio_bytes: bytes, shift: float) -> bytes:
@@ -156,6 +163,66 @@ class EdgeTTSEngine(BaseTTSEngine):
             logger.warning("FFmpeg pitch shifting failed: %s", exc)
         return audio_bytes
 
+
+class SileroTTSEngine(BaseTTSEngine):
+    """Local 100% offline Silero TTS engine on CPU with anime pitch shifting."""
+
+    def __init__(self, cfg: TTSConfig, dict_path: Path | None = None) -> None:
+        self.cfg = cfg
+        self.pronounce = PronunciationDictionary(dict_path)
+        self._model: Any = None
+        self._device = torch.device("cpu")
+
+    def _get_model(self) -> Any:
+        if self._model is None:
+            logger.info("Loading local Silero TTS model (100% offline)...")
+            model, _ = torch.hub.load(
+                repo_or_dir="snakers4/silero-models",
+                model="silero_tts",
+                language="ru",
+                speaker="v4_ru",
+            )
+            model.to(self._device)
+            self._model = model
+        return self._model
+
+    async def synthesize(self, text: str, emotion: str = "neutral", intensity: float = 1.0) -> bytes:
+        clean_text = self.pronounce.apply(text).strip()
+        if not clean_text:
+            return b""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._sync_synthesize, clean_text)
+
+    def _sync_synthesize(self, text: str) -> bytes:
+        try:
+            model = self._get_model()
+            audio = model.apply_tts(text=text, speaker="kseniya", sample_rate=24000)
+            pcm_data = (audio.numpy() * 32767).astype(np.int16).tobytes()
+
+            shift = getattr(self.cfg, "pitch_shift", 1.15)
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "s16le",
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                "-i",
+                "pipe:0",
+                "-af",
+                f"asetrate=24000*{shift},aresample=24000,atempo={1.0 / shift},volume=1.2",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+            proc = subprocess.run(cmd, input=pcm_data, capture_output=True, check=False)
+            if proc.returncode == 0 and proc.stdout:
+                return proc.stdout
+        except (subprocess.SubprocessError, OSError, RuntimeError, ValueError) as exc:
+            logger.error("Silero TTS synthesis failed: %s", exc)
+        return b""
 
 
 class MockTTSEngine(BaseTTSEngine):
@@ -199,7 +266,8 @@ def create_tts_engine(cfg: TTSConfig, dry_run: bool = False) -> BaseTTSEngine:
     """TTS engine factory."""
     if dry_run:
         return MockTTSEngine()
+    if cfg.engine == "silero":
+        return SileroTTSEngine(cfg)
     if cfg.engine == "edge":
         return EdgeTTSEngine(cfg)
-    # Default fallback
     return EdgeTTSEngine(cfg)

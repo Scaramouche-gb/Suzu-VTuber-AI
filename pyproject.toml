@@ -15,6 +15,7 @@ dependencies = [
     "imagehash>=4.3.2",
     "litellm>=1.105.0",
     "numpy>=2.5.4",
+    "omegaconf>=2.4.0",
     "pillow>=12.3.0",
     "pydantic>=2.14.1",
     "silero-vad>=6.2.3",

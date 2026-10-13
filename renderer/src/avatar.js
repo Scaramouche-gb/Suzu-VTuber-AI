@@ -94,6 +94,11 @@ export class AvatarController {
         2.0
       );
     });
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'f' || e.key === 'F') {
+        this.flip();
+      }
+    });
   }
 
   onWindowResize() {
@@ -132,9 +137,15 @@ export class AvatarController {
 
     this.mixer = new THREE.AnimationMixer(vrm.scene);
 
-    // Initial setup
-    vrm.scene.rotation.y = 0;
+    // Initial setup (face camera towards +Z)
+    vrm.scene.rotation.y = Math.PI;
     return vrm;
+  }
+
+  flip() {
+    if (this.vrm && this.vrm.scene) {
+      this.vrm.scene.rotation.y = (this.vrm.scene.rotation.y + Math.PI) % (Math.PI * 2);
+    }
   }
 
   update(delta) {

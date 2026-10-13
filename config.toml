@@ -19,10 +19,10 @@ max_usd_per_day = 10.0
 
 [stt]
 engine = "faster-whisper"
-model = "large-v3-turbo"
+model = "small"
 device = "cuda"
 compute_type = "float16"
-language = ""
+language = "ru"
 initial_prompt = "Разговор с подругой по имени Сузу."
 
 [audio_in]
@@ -34,7 +34,7 @@ end_silence_ms = 700
 preroll_ms = 300
 
 [tts]
-engine = "edge"
+engine = "silero"
 voice = "ru-RU-SvetlanaNeural"
 rate = "+5%"
 pitch = "+2Hz"

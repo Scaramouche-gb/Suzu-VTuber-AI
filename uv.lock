@@ -1498,6 +1498,18 @@ wheels = [
 ]
 
 [[package]]
+name = "omegaconf"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cc/10/1cabf3188a4d9684a06568c7fd76f9536eede625733c8399cf1f5337b83e/omegaconf-2.4.0.tar.gz", hash = "sha256:7e219a70bea371da250285b9c01c7db027bc421722799c2cc4ff14bc4a2a753b", size = 3544508, upload-time = "2026-10-09T12:44:02.326Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/bd/0d9f8247b0819385213d09564eda5c52d3673313c2414d51f72883ec24cd/omegaconf-2.4.0-py3-none-any.whl", hash = "sha256:f141a664c777582405e3cc6e0545ecc79429e79f844995b1a6e71c35946a025c", size = 254152, upload-time = "2026-10-09T12:43:59.764Z" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.31.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2384,6 +2396,7 @@ dependencies = [
     { name = "imagehash" },
     { name = "litellm" },
     { name = "numpy" },
+    { name = "omegaconf" },
     { name = "pillow" },
     { name = "pydantic" },
     { name = "silero-vad" },
@@ -2408,6 +2421,7 @@ requires-dist = [
     { name = "imagehash", specifier = ">=4.3.2" },
     { name = "litellm", specifier = ">=1.105.0" },
     { name = "numpy", specifier = ">=2.5.4" },
+    { name = "omegaconf", specifier = ">=2.4.0" },
     { name = "pillow", specifier = ">=12.3.0" },
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "silero-vad", specifier = ">=6.2.3" },
