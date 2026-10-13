@@ -70,6 +70,105 @@ def get_rvc_semitones(base_f0: int, emotion: str, intensity: float = 1.0) -> int
     return base_f0
 
 
+def build_silero_ssml(text: str, emotion: str, intensity: float = 1.0) -> str:
+    """Build expressive SSML for Silero TTS with emotional prosody and organic breath breaks."""
+    clean = text.strip()
+    # Add subtle micro-breaks after lively human interjections
+    interjections = (
+        "Хе-хе", "Ха-ха", "Ой", "Ой-й", "Ух ты", "Ого", "Ого-го",
+        "Пс-с", "Тсс", "Хм", "Хм-м", "Эх", "Эх-х", "Эй",
+    )
+    for interj in interjections:
+        for punct in (",", "!", ".", "...", "—"):
+            target = f"{interj}{punct}"
+            if target in clean:
+                clean = clean.replace(target, f"{interj}{punct} <break time=\"110ms\"/>")
+
+    emo = (emotion or "neutral").lower()
+    if emo == "whisper":
+        prosody = '<prosody rate="x-slow" pitch="x-low">'
+    elif emo in ("excited", "surprised"):
+        prosody = '<prosody rate="fast" pitch="x-high">'
+    elif emo in ("happy", "joy", "laugh", "playful", "silly", "smug"):
+        prosody = '<prosody rate="medium" pitch="high">'
+    elif emo in ("sad", "worried", "sorrow", "pout"):
+        prosody = '<prosody rate="slow" pitch="low">'
+    elif emo in ("angry", "annoyed"):
+        prosody = '<prosody rate="fast" pitch="medium">'
+    elif emo in ("sleepy", "tired", "relaxed"):
+        prosody = '<prosody rate="slow" pitch="x-low">'
+    else:
+        prosody = '<prosody rate="medium" pitch="medium">'
+
+    return f"<speak>{prosody}{clean}</prosody></speak>"
+
+
+def apply_emotion_mastering(
+    audio_bytes: bytes, emotion: str, intensity: float = 1.0
+) -> bytes:
+    """Master final post-TTS/post-RVC audio with acoustic EQ, presence, air, and volume dynamics."""
+    if not audio_bytes:
+        return audio_bytes
+    emo = (emotion or "neutral").lower()
+    scale = min(1.0, max(0.0, intensity))
+
+    if emo == "whisper":
+        vol = max(0.40, 0.65 - 0.15 * scale)
+        af = (
+            "highpass=f=260,"
+            "equalizer=f=350:width_type=h:width=200:g=-4.0,"
+            "treble=g=4.5:f=8000,"
+            f"volume={vol:.2f}"
+        )
+    elif emo in ("excited", "surprised"):
+        vol = min(1.40, 1.22 + 0.12 * scale)
+        af = (
+            "treble=g=2.5:f=6500,"
+            "equalizer=f=3200:width_type=q:width=1.5:g=2.0,"
+            f"volume={vol:.2f}"
+        )
+    elif emo in ("happy", "joy", "laugh", "playful", "silly", "smug"):
+        vol = min(1.30, 1.16 + 0.08 * scale)
+        af = (
+            "treble=g=1.5:f=7000,"
+            "equalizer=f=3000:width_type=q:width=1.5:g=1.2,"
+            f"volume={vol:.2f}"
+        )
+    elif emo in ("sad", "sorrow", "worried", "pout"):
+        vol = max(0.75, 0.90 - 0.10 * scale)
+        af = (
+            "equalizer=f=2800:width_type=q:width=1.5:g=-2.0,"
+            f"volume={vol:.2f}"
+        )
+    elif emo in ("angry", "annoyed"):
+        vol = min(1.35, 1.22 + 0.10 * scale)
+        af = (
+            "equalizer=f=2500:width_type=q:width=1.5:g=2.2,"
+            f"volume={vol:.2f}"
+        )
+    else:
+        af = "volume=1.05"
+
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            "pipe:0",
+            "-af",
+            af,
+            "-f",
+            "mp3",
+            "pipe:1",
+        ]
+        proc = subprocess.run(cmd, input=audio_bytes, capture_output=True, check=False)
+        if proc.returncode == 0 and proc.stdout:
+            return proc.stdout
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.warning("Post-mastering FFmpeg failed (%s), returning base audio", exc)
+    return audio_bytes
+
+
 class BaseTTSEngine(abc.ABC):
     """Abstract base class for TTS synthesis engines."""
 
@@ -92,26 +191,31 @@ class EdgeTTSEngine(BaseTTSEngine):
     def _get_emotion_modulation(self, emotion: str, intensity: float) -> tuple[str, str]:
         """Compute rate and pitch offsets based on emotion."""
         rate = self.cfg.rate
-        # Microsoft Edge TTS rejects non-standard pitch modulations with 403 Forbidden;
-        # keep pitch at +0Hz to prevent connection rejections while modulating speech rate.
         pitch = self.cfg.pitch
 
         scale = min(1.0, max(0.0, intensity))
-        if emotion == "happy":
+        emo = (emotion or "neutral").lower()
+        if emo in ("happy", "joy"):
             rate = f"+{int(4 + 4 * scale)}%"
             pitch = f"+{int(2 + 2 * scale)}Hz"
-        elif emotion == "sad":
+        elif emo in ("excited", "surprised"):
+            rate = f"+{int(6 + 4 * scale)}%"
+            pitch = f"+{int(4 + 3 * scale)}Hz"
+        elif emo in ("playful", "silly", "laugh"):
+            rate = f"+{int(4 + 3 * scale)}%"
+            pitch = f"+{int(2 + 2 * scale)}Hz"
+        elif emo == "whisper":
+            rate = f"-{int(6 + 4 * scale)}%"
+            pitch = f"-{int(2 + 2 * scale)}Hz"
+        elif emo in ("sad", "sorrow", "worried", "pout"):
             rate = f"-{int(5 + 5 * scale)}%"
             pitch = f"-{int(3 + 2 * scale)}Hz"
-        elif emotion == "angry":
+        elif emo in ("angry", "annoyed"):
             rate = f"+{int(6 + 4 * scale)}%"
             pitch = f"+{int(3 + 2 * scale)}Hz"
-        elif emotion == "surprised":
-            rate = f"+{int(5 + 3 * scale)}%"
-            pitch = f"+{int(3 + 2 * scale)}Hz"
-        elif emotion == "relaxed":
-            rate = f"-{int(3 + 3 * scale)}%"
-            pitch = f"-{int(1 + 2 * scale)}Hz"
+        elif emo in ("relaxed", "sleepy", "tired"):
+            rate = f"-{int(4 + 3 * scale)}%"
+            pitch = f"-{int(2 + 2 * scale)}Hz"
 
         return rate, pitch
 
@@ -147,7 +251,7 @@ class EdgeTTSEngine(BaseTTSEngine):
                     if self.cfg.rvc.enabled:
                         rvc_semitones = get_rvc_semitones(self.cfg.rvc.f0_up_key, emotion, intensity)
                         audio_data = await self.rvc.convert(audio_data, f0_up_key=rvc_semitones)
-                    return audio_data
+                    return apply_emotion_mastering(audio_data, emotion, intensity)
             except (
                 aiohttp.ClientError,
                 edge_tts.exceptions.EdgeTTSException,
@@ -227,15 +331,22 @@ class SileroTTSEngine(BaseTTSEngine):
         )
         if self.cfg.rvc.enabled and raw_audio:
             rvc_semitones = get_rvc_semitones(self.cfg.rvc.f0_up_key, emotion, intensity)
-            return await self.rvc.convert(raw_audio, f0_up_key=rvc_semitones)
-        return raw_audio
+            audio = await self.rvc.convert(raw_audio, f0_up_key=rvc_semitones)
+        else:
+            audio = raw_audio
+        return apply_emotion_mastering(audio, emotion, intensity)
 
     def _sync_synthesize(
         self, text: str, emotion: str = "neutral", intensity: float = 1.0
     ) -> bytes:
         try:
             model = self._get_model()
-            audio = model.apply_tts(text=text, speaker="kseniya", sample_rate=24000)
+            ssml_text = build_silero_ssml(text, emotion, intensity)
+            try:
+                audio = model.apply_tts(ssml_text=ssml_text, speaker="kseniya", sample_rate=24000)
+            except (RuntimeError, ValueError, TypeError, KeyError) as ssml_err:
+                logger.debug("Silero SSML synthesis fallback (%s), using raw text", ssml_err)
+                audio = model.apply_tts(text=text, speaker="kseniya", sample_rate=24000)
             pcm_data = (audio.numpy() * 32767).astype(np.int16).tobytes()
 
             base_shift = getattr(self.cfg, "pitch_shift", 1.04)

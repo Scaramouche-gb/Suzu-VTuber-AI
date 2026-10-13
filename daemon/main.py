@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from aiohttp import web
 
 from daemon.audio_in import AudioInManager
@@ -202,6 +203,33 @@ async def run_server(
             "daemon.overlay",
         )
 
+    rvc_proc: asyncio.subprocess.Process | None = None
+    if cfg.tts.rvc.enabled and cfg.tts.rvc.mode == "sidecar":
+        health_url = cfg.tts.rvc.server_url.replace("/infer", "/health")
+        is_healthy = False
+        try:
+            async with aiohttp.ClientSession() as s, s.get(
+                health_url, timeout=aiohttp.ClientTimeout(total=0.8)
+            ) as r:
+                if r.status == 200:
+                    is_healthy = True
+                    logger.info("RVC sidecar is ready at %s", cfg.tts.rvc.server_url)
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            is_healthy = False
+
+        if not is_healthy:
+            rvc_py = Path("sidecars/rvc/.venv/bin/python")
+            if rvc_py.exists():
+                logger.info("Auto-starting local RVC sidecar server on port 5050...")
+                rvc_proc = await asyncio.create_subprocess_exec(
+                    str(rvc_py),
+                    "sidecars/rvc/server.py",
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    "5050",
+                )
+
     repl_task: asyncio.Task[None] | None = None
     if text_mode:
         repl_task = asyncio.create_task(text_repl_loop(conductor, stop_event))
@@ -211,6 +239,8 @@ async def run_server(
     finally:
         if overlay_proc and overlay_proc.returncode is None:
             overlay_proc.terminate()
+        if rvc_proc and rvc_proc.returncode is None:
+            rvc_proc.terminate()
         if repl_task and not repl_task.done():
             repl_task.cancel()
         if not no_mic:

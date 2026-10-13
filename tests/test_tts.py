@@ -117,3 +117,21 @@ async def test_rvc_sidecar_fallback_on_unreachable() -> None:
     assert result == b"test-audio-bytes"
     await converter.close()
 
+
+def test_build_silero_ssml() -> None:
+    from daemon.tts import build_silero_ssml
+
+    ssml_whisper = build_silero_ssml("Хе-хе, я шёпотом скажу.", emotion="whisper")
+    assert "<speak>" in ssml_whisper
+    assert '<prosody rate="x-slow" pitch="x-low">' in ssml_whisper
+    assert '<break time="110ms"/>' in ssml_whisper
+
+    ssml_excited = build_silero_ssml("Ого! Вот это да!", emotion="excited")
+    assert '<prosody rate="fast" pitch="x-high">' in ssml_excited
+
+
+def test_apply_emotion_mastering_empty() -> None:
+    from daemon.tts import apply_emotion_mastering
+
+    assert apply_emotion_mastering(b"", "whisper") == b""
+

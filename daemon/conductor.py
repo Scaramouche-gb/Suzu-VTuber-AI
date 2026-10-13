@@ -322,13 +322,36 @@ class Conductor:
         clean_text = text.strip()
         if clean_text:
             # Check if user speech looks fragmented, cut off, or indistinct
-            tokens = [t for t in clean_text.split() if t.strip(".,!?-")]
+            tokens = [t.strip(".,!?-").lower() for t in clean_text.split() if t.strip(".,!?-")]
+            # Greetings, short conversational answers, and common cues are never fragmented
+            common_complete = {
+                "алло", "привет", "хай", "ку", "здарова", "хеллоу", "сузу", "эй",
+                "да", "нет", "ага", "неа", "слушай", "ты тут", "как дела", "что делаешь",
+                "что это", "кто здесь", "почему", "зачем", "как", "кто", "где", "куда",
+                "ладно", "пока", "ясно", "понятно", "ого", "вау", "жесть", "круто", "норм",
+                "спасибо", "отлично", "стоп", "хватит", "подожди", "смотри", "глянь",
+                "скажи", "расскажи", "покажи", "он скажет что-нибудь",
+            }
+            raw_clean = " ".join(tokens)
+            is_common_turn = raw_clean in common_complete or any(
+                raw_clean.startswith(c) for c in ("алло", "привет", "сузу", "ты тут", "слушай")
+            )
+
             is_fragment = (
-                len(tokens) <= 2
-                or clean_text.endswith(("...", "—"))
-                or any(
-                    clean_text.lower().startswith(p)
-                    for p in ("ну...", "это...", "как там...", "эээ", "ммм")
+                not is_common_turn
+                and (
+                    clean_text.endswith(("...", "—"))
+                    or any(
+                        clean_text.lower().startswith(p)
+                        for p in ("ну...", "это...", "как там...", "эээ", "ммм")
+                    )
+                    or (
+                        len(tokens) <= 2
+                        and any(
+                            tokens[-1] == end_w
+                            for end_w in ("что", "если", "а", "но", "когда", "чтобы", "или", "хотя", "потому")
+                        )
+                    )
                 )
             )
             if is_fragment and (event.duration_s >= 0.75):
@@ -907,6 +930,23 @@ class Conductor:
                 intensity = t.intensity
             elif isinstance(t, GestureTag):
                 primary_gst = t.name
+
+        if not primary_gst:
+            emo_lower = (primary_emo or "").lower()
+            if emo_lower in ("excited", "surprised"):
+                primary_gst = "wave" if emo_lower == "excited" else "surprise"
+            elif emo_lower in ("happy", "joy"):
+                primary_gst = "nod"
+            elif emo_lower in ("playful", "silly", "laugh"):
+                primary_gst = "laugh"
+            elif emo_lower in ("whisper", "curious"):
+                primary_gst = "think"
+            elif emo_lower in ("pout", "annoyed", "angry"):
+                primary_gst = "shake"
+            elif emo_lower in ("sad", "worried"):
+                primary_gst = "shrug"
+            else:
+                primary_gst = "nod"
 
         logger.info("[Say %s] %s (emo=%s, gst=%s)", utt_id, chunk.text, primary_emo, primary_gst)
 
