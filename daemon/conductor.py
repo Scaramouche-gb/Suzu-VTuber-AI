@@ -229,20 +229,24 @@ class Conductor:
         """Handle a complete user message turn with cancellation of stale turns."""
         start_ts = t_start or time.time()
 
-        # On-the-fly user name correction detection
-        if self.memory:
+        # On-the-fly user name correction detection (strict affirmative pattern, ignore questions)
+        if self.memory and not re.search(
+            r"\b(?:как|помнишь|знаешь|угадай|кто)\b", user_text, re.IGNORECASE
+        ):
             name_match = re.search(
-                r"(?:меня зовут|мо[её] имя|я)\s+([А-Яа-яA-Za-z]+)(?:[,\s]+а\s+не\s+([А-Яа-яA-Za-z]+))?",
+                r"(?:(?:меня зовут|мо[её] имя)\s+([А-ЯЁA-Z][а-яёa-z]+)|я\s+(?:не\s+([А-ЯЁA-Z][а-яёa-z]+)[,\s]+а\s+([А-ЯЁA-Z][а-яёa-z]+)|([А-ЯЁA-Z][а-яёa-z]+)[,\s]+а\s+не\s+([А-ЯЁA-Z][а-яёa-z]+)))",
                 user_text,
-                re.IGNORECASE,
             )
             if name_match:
-                detected_name = name_match.group(1).strip()
-                if detected_name.lower() not in (
-                    "думаю", "устал", "спать", "тут", "здесь", "делаю", "просто", "не", "уже", "хочу", "буду"
-                ):
-                    wrong_name = name_match.group(2).strip() if name_match.group(2) else None
-                    asyncio.create_task(self.memory.update_user_name_facts(detected_name, wrong_name))
+                g1 = name_match.group(1)
+                g2, g3 = name_match.group(2), name_match.group(3)
+                g4, g5 = name_match.group(4), name_match.group(5)
+                detected_name = g1 or g3 or g4
+                wrong_name = g2 or g5
+                if detected_name and len(detected_name) >= 2:
+                    asyncio.create_task(
+                        self.memory.update_user_name_facts(detected_name, wrong_name)
+                    )
 
         # Context block from vision
         if context_info is None and self.vision:
