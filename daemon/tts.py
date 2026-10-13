@@ -256,7 +256,15 @@ class SileroTTSEngine(BaseTTSEngine):
                 tempo_factor = 1.01
                 volume = 1.20
 
-            final_tempo = max(0.6, min(1.8, (1.0 / shift) * tempo_factor))
+            final_tempo = max(0.6, min(1.8, tempo_factor))
+            vocal_filter = (
+                f"highpass=f=75,"
+                f"rubberband=pitch={shift:.3f}:tempo={final_tempo:.3f}:formant=preserved,"
+                f"equalizer=f=280:width_type=h:width=120:g=1.8,"
+                f"equalizer=f=3400:width_type=q:width=1.8:g=-2.0,"
+                f"treble=g=1.5:f=7500,"
+                f"compand=attacks=0.02:decays=0.1:points=-80/-80|-32/-18|-12/-6|0/-2:gain={volume:.2f}"
+            )
 
             cmd = [
                 "ffmpeg",
@@ -270,7 +278,7 @@ class SileroTTSEngine(BaseTTSEngine):
                 "-i",
                 "pipe:0",
                 "-af",
-                f"asetrate=24000*{shift:.3f},aresample=24000,atempo={final_tempo:.3f},volume={volume:.2f}{eq}",
+                vocal_filter,
                 "-f",
                 "mp3",
                 "pipe:1",
@@ -278,6 +286,29 @@ class SileroTTSEngine(BaseTTSEngine):
             proc = subprocess.run(cmd, input=pcm_data, capture_output=True, check=False)
             if proc.returncode == 0 and proc.stdout:
                 return proc.stdout
+
+            # Fallback to legacy asetrate if rubberband fails
+            fallback_tempo = max(0.6, min(1.8, (1.0 / shift) * final_tempo))
+            cmd_fallback = [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "s16le",
+                "-ar",
+                "24000",
+                "-ac",
+                "1",
+                "-i",
+                "pipe:0",
+                "-af",
+                f"asetrate=24000*{shift:.3f},aresample=24000,atempo={fallback_tempo:.3f},volume={volume:.2f}{eq}",
+                "-f",
+                "mp3",
+                "pipe:1",
+            ]
+            proc_fb = subprocess.run(cmd_fallback, input=pcm_data, capture_output=True, check=False)
+            if proc_fb.returncode == 0 and proc_fb.stdout:
+                return proc_fb.stdout
         except (subprocess.SubprocessError, OSError, RuntimeError, ValueError) as exc:
             logger.error("Silero TTS synthesis failed: %s", exc)
         return b""

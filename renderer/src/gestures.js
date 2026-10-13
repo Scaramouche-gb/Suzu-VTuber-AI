@@ -62,12 +62,15 @@ export class GestureManager {
     const chest = this.vrm.humanoid.getNormalizedBoneNode('chest');
     const leftShoulder = this.vrm.humanoid.getNormalizedBoneNode('leftShoulder');
     const rightShoulder = this.vrm.humanoid.getNormalizedBoneNode('rightShoulder');
+    const leftUpperArm = this.vrm.humanoid.getNormalizedBoneNode('leftUpperArm');
     const rightUpperArm = this.vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
     const rightLowerArm = this.vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
     const rightHand = this.vrm.humanoid.getNormalizedBoneNode('rightHand');
 
-    // Smooth bell curve envelope (rises from 0 to 1 and back to 0)
-    const envelope = Math.sin(progress * Math.PI);
+    // Smooth organic bell curve with gentle ease-in and soft overshoot damping
+    const t = progress;
+    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const envelope = Math.sin(eased * Math.PI);
 
     switch (this.activeGesture) {
       case 'nod': {

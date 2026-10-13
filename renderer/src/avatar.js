@@ -176,10 +176,19 @@ export class AvatarController {
     this.updateBlinking(delta);
 
     // 4. Smooth LookAt interpolation with subtle saccadic micro-drift
-    const saccadeX = Math.sin(this.breathTime * 1.7) * 0.015;
-    const saccadeY = Math.cos(this.breathTime * 1.3) * 0.01;
-    const driftedLook = this.targetLookPos.clone().add(new THREE.Vector3(saccadeX, saccadeY, 0));
-    this.currentLookPos.lerp(driftedLook, Math.min(1.0, delta * 5.0));
+    this.saccadeTimer = (this.saccadeTimer || 0) + delta;
+    if (this.saccadeTimer > (this.nextSaccade || 2.2)) {
+      this.saccadeTimer = 0;
+      this.nextSaccade = 1.4 + Math.random() * 2.2;
+      this.saccadeOffset = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.035,
+        (Math.random() - 0.5) * 0.02,
+        0
+      );
+    }
+    const currentOffset = this.saccadeOffset || new THREE.Vector3();
+    const driftedLook = this.targetLookPos.clone().add(currentOffset);
+    this.currentLookPos.lerp(driftedLook, Math.min(1.0, delta * 6.0));
     this.lookTarget.position.copy(this.currentLookPos);
 
     // 5. Animation mixer
@@ -322,7 +331,8 @@ export class AvatarController {
       this.isBlinking = true;
       this.blinkProgress = 0;
       this.blinkTimer = 0;
-      this.nextBlinkInterval = 2.2 + Math.random() * 3.8;
+      // 20% chance of double-blink pattern for natural human realism
+      this.nextBlinkInterval = Math.random() < 0.20 ? 0.35 : 2.4 + Math.random() * 3.6;
     }
 
     if (this.isBlinking) {
