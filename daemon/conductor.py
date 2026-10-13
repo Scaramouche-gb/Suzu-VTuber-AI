@@ -516,24 +516,45 @@ class Conductor:
 
     async def handle_telegram_message(self, event: TelegramMessage) -> None:
         """Handle incoming message received from Telegram."""
+        clean_text = (event.text or "").strip()
+        clean_lower = clean_text.lower()
+        default_id = str(self.telegram.cfg.default_chat_id or "").strip() if self.telegram else ""
+        is_default_chat = False
+        if default_id:
+            raw_cid = str(event.chat_id).lstrip("-")
+            is_default_chat = raw_cid == default_id or str(event.chat_id) == default_id
+
+        is_direct_mention = "сузу" in clean_lower or "suzu" in clean_lower
+
+        # Only trigger vocal turns if directly mentioned or in default private chat with Sasha
+        if not (is_default_chat or is_direct_mention):
+            logger.debug("[Conductor] Telegram message ignored (not default chat or mention)")
+            return
+
         logger.info(
-            "[Conductor] Telegram message received from %s (%s): %s",
+            "[Conductor] Targeted Telegram message from %s (%s): %s",
             event.sender_name,
             event.chat_id,
-            event.text,
+            clean_text,
         )
         if self.telegram and self.telegram.cfg.auto_reply:
-            media_type = " (голосовое)" if event.is_voice else (" (видеосообщение-кружок)" if event.is_video_note else "")
+            media_type = (
+                " (голосовое)"
+                if event.is_voice
+                else (" (видеосообщение-кружок)" if event.is_video_note else "")
+            )
             prompt = (
-                f"[ВХОДЯЩЕЕ СООБЩЕНИЕ ИЗ TELEGRAM от {event.sender_name}{media_type}]: «{event.text}».\n"
+                f"[ВХОДЯЩЕЕ СООБЩЕНИЕ ИЗ TELEGRAM от {event.sender_name}{media_type}]: «{clean_text}».\n"
                 f"Ты можешь ответить собеседнику в Telegram текстом через <cmd=tg_reply:...>, "
                 f"голосовым сообщением через <cmd=tg_voice:...> или кружком с аватаром через <cmd=tg_round:...>, "
                 f"а также озвучить комментарий Саше вслух."
             )
-            # Only trigger proactive reply if not busy speaking or listening
-            if self.state in ("idle", "listening"):
+            # Only trigger proactive reply if completely idle (don't interrupt Sasha speaking)
+            if self.state == "idle":
                 asyncio.create_task(
-                    self.process_user_turn(prompt, context_info=f"[Telegram from {event.sender_name}]")
+                    self.process_user_turn(
+                        prompt, context_info=f"[Telegram from {event.sender_name}]"
+                    )
                 )
 
     async def process_user_turn(

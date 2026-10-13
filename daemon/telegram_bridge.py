@@ -391,18 +391,42 @@ class TelegramBridge:
     async def _handle_incoming_telethon_msg(self, event: Any) -> None:
         """Process incoming message from Telethon."""
         try:
+            # 1. Ignore broadcast channels, news feeds, and spam channels completely
+            if getattr(event, "is_channel", False) and not getattr(event, "is_group", False):
+                return
+
             text = event.raw_text or ""
+            chat_id = event.chat_id
+            is_private = getattr(event, "is_private", False)
+            default_id = str(self.cfg.default_chat_id or "").strip()
+            is_default_chat = bool(
+                default_id and (str(chat_id) == default_id or str(abs(chat_id)) == default_id)
+            )
+
+            # 2. In group chats, only react if Suzu is explicitly mentioned or replied to
+            clean_lower = text.lower()
+            is_mentioned = (
+                "сузу" in clean_lower
+                or "suzu" in clean_lower
+                or getattr(event, "mentioned", False)
+                or is_default_chat
+            )
+
+            # If it's a random group/supergroup message without mention or default chat, discard it
+            if not is_private and not is_mentioned:
+                return
+
             sender = await event.get_sender()
             sender_name = getattr(sender, "first_name", "") or getattr(sender, "title", "User")
-            chat_id = event.chat_id
             is_voice = bool(getattr(event, "voice", False))
             is_video_note = bool(getattr(event, "video_note", False))
 
             logger.info(
-                "[Telegram Bridge] Incoming Userbot msg from %s (%s): %s",
+                "[Telegram Bridge] Filtered incoming msg from %s (%s, private=%s): %s",
                 sender_name,
                 chat_id,
-                text,
+                is_private,
+                text[:60],
             )
             await self.bus.publish(
                 TelegramMessage(
@@ -419,6 +443,7 @@ class TelegramBridge:
     async def _bot_polling_loop(self) -> None:
         """Background long-polling loop for Telegram Bot API."""
         logger.info("Starting Telegram Bot API long-polling loop")
+        default_id = str(self.cfg.default_chat_id or "").strip()
         while self._running:
             if not self._http_session:
                 await asyncio.sleep(2.0)
@@ -443,18 +468,28 @@ class TelegramBridge:
                         if not msg:
                             continue
 
-                        chat_id = msg.get("chat", {}).get("id", "")
+                        chat = msg.get("chat", {})
+                        chat_id = chat.get("id", "")
+                        chat_type = chat.get("type", "")
                         from_user = msg.get("from", {})
                         sender_name = from_user.get("first_name", "User")
                         text = msg.get("text", "")
+                        clean_lower = text.lower()
+
+                        # Only process private chats, default chat, or direct mentions
+                        is_mentioned = "сузу" in clean_lower or "suzu" in clean_lower
+                        is_default = bool(default_id and str(chat_id) == default_id)
+                        if chat_type != "private" and not is_default and not is_mentioned:
+                            continue
+
                         is_voice = "voice" in msg
                         is_video_note = "video_note" in msg
 
                         logger.info(
-                            "[Telegram Bridge] Incoming Bot msg from %s (%s): %s",
+                            "[Telegram Bridge] Filtered incoming Bot msg from %s (%s): %s",
                             sender_name,
                             chat_id,
-                            text,
+                            text[:60],
                         )
                         await self.bus.publish(
                             TelegramMessage(
