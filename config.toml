@@ -43,7 +43,7 @@ pitch_shift = 1.04
 [tts.xtts]
 enabled = true
 server_url = "http://127.0.0.1:5055/synthesize"
-speaker_wav = "models/xtts/speaker.wav"
+speaker_wav = "models/xtts/nyamura_speaker.wav"
 language = "ru"
 speed = 1.0
 
@@ -51,8 +51,8 @@ speed = 1.0
 enabled = false
 mode = "sidecar"
 server_url = "http://127.0.0.1:5050/infer"
-model_path = "models/rvc/hutao/Hutao_v2.pth"
-index_path = "models/rvc/hutao/added_IVF459_Flat_nprobe_1_Hutao_v2_v2.index"
+model_path = "models/rvc/nyamura/nyamura-ru.pth"
+index_path = "models/rvc/nyamura/nyamura-ru.index"
 f0_up_key = 0
 
 [vision]

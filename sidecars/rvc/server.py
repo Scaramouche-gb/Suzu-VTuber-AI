@@ -36,8 +36,8 @@ from rvc_python.infer import RVCInference
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("rvc_sidecar")
 
-DEFAULT_MODEL = "models/rvc/hutao/Hutao_v2.pth"
-DEFAULT_INDEX = "models/rvc/hutao/added_IVF459_Flat_nprobe_1_Hutao_v2_v2.index"
+DEFAULT_MODEL = "models/rvc/nyamura/nyamura-ru.pth"
+DEFAULT_INDEX = "models/rvc/nyamura/nyamura-ru.index"
 
 # Global inference engine
 engine: RVCInference | None = None
@@ -89,6 +89,11 @@ async def health() -> dict[str, str | bool]:
 def _run_inference(in_path: str, out_path: str) -> None:
     if engine is not None:
         engine.infer_file(in_path, out_path)
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        import gc
+
+        gc.collect()
 
 
 @app.post("/infer")
