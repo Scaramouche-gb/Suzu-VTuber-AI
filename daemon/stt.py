@@ -34,6 +34,12 @@ HALLUCINATION_BLACKLIST = [
     "subtitles by",
     "translated by",
     "subscribe to my channel",
+    "спасибо",
+    "до свидания",
+    "до свиданья",
+    "музыка",
+    "аплодисменты",
+    "пока пока",
 ]
 
 
@@ -125,14 +131,14 @@ class WhisperSTT:
                 continue
 
             # 1. Metric filtering
-            if segment.no_speech_prob > 0.65:
+            if segment.no_speech_prob > 0.45:
                 logger.debug(
                     "STT: Discarded segment due to no_speech_prob (%.2f): '%s'",
                     segment.no_speech_prob,
                     text,
                 )
                 continue
-            if segment.avg_logprob < -1.1:
+            if segment.avg_logprob < -0.95:
                 logger.debug(
                     "STT: Discarded segment due to low avg_logprob (%.2f): '%s'",
                     segment.avg_logprob,
@@ -153,8 +159,16 @@ class WhisperSTT:
                 logger.debug("STT: Discarded blacklisted hallucination: '%s'", text)
                 continue
 
-            # 3. Minimum length
-            if len(clean_lower.strip(".,!?-—~ ")) < 2:
+            # 3. Minimum length & solitary noise token rejection
+            stripped = clean_lower.strip(".,!?-—~ ")
+            if len(stripped) < 2:
+                continue
+
+            tokens = [t.strip(".,!?-—~ ") for t in clean_lower.split() if t.strip(".,!?-—~ ")]
+            if len(tokens) == 1 and tokens[0] in (
+                "да", "а", "о", "э", "угу", "ну", "так", "ага", "и", "что", "хм", "мм", "ок"
+            ):
+                logger.debug("STT: Discarded solitary noise token: '%s'", text)
                 continue
 
             valid_texts.append(text)

@@ -28,10 +28,10 @@ initial_prompt = "Разговор с подругой по имени Сузу.
 [audio_in]
 device = ""
 sample_rate = 16000
-vad_threshold = 0.5
-min_speech_ms = 250
-end_silence_ms = 700
-preroll_ms = 300
+vad_threshold = 0.65
+min_speech_ms = 450
+end_silence_ms = 800
+preroll_ms = 350
 
 [tts]
 engine = "silero"

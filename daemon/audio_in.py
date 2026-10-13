@@ -141,7 +141,7 @@ class AudioInManager:
         silence_duration_ms = 0.0
         speech_frames: list[np.ndarray] = []
 
-        consecutive_required = 2
+        consecutive_required = 3
         frame_duration_ms = (FRAME_SIZE / SAMPLE_RATE) * 1000.0  # 32 ms
 
         while self._running:
@@ -236,5 +236,11 @@ class AudioInManager:
             logger.debug("VAD: Rejected brief click (%.2fs < %.2fs)", duration_s, min_speech_s)
             return
 
-        logger.info("VAD: Captured user phrase (duration: %.2fs)", duration_s)
+        # Reject quiet ambient room noise / breathing (RMS threshold)
+        rms = float(np.sqrt(np.mean(total_audio**2)))
+        if rms < 0.012:
+            logger.debug("VAD: Rejected quiet ambient noise (rms=%.4f < 0.0120)", rms)
+            return
+
+        logger.info("VAD: Captured user phrase (duration: %.2fs, rms: %.4f)", duration_s, rms)
         await self.bus.publish(UserSpeech(audio_data=total_audio, duration_s=duration_s))

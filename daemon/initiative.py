@@ -7,6 +7,7 @@ import logging
 import math
 import random
 import time
+from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -33,13 +34,13 @@ MOOD_FACTORS: dict[Mood, float] = {
 
 INITIATIVE_SEEDS: list[str] = [
     "tease_screen",
-    "react_to_coding",
-    "comment_night_work",
+    "critique_code_or_bugs",
+    "tech_banter_or_linux",
+    "geek_curiosity",
     "joke_or_banter",
-    "ask_question",
-    "random_thought",
-    "recall_memory",
-    "suggest_break",
+    "roast_active_window",
+    "cyber_lifestyle_joke",
+    "recall_project_milestone",
 ]
 
 
@@ -72,6 +73,7 @@ class InitiativeManager:
         self.last_app: str = ""
         self.last_app_comment_ts: dict[str, float] = {}
         self.recent_initiatives: list[str] = []
+        self.recent_seeds: deque[str] = deque(maxlen=4)
 
         self.last_mood_switch_ts: float = now
         self.mood_switch_interval_s: float = 1800.0  # 30 minutes
@@ -241,7 +243,11 @@ class InitiativeManager:
         roll = random.random()
 
         if roll < p_tick:
-            seed = random.choice(INITIATIVE_SEEDS)
+            available_seeds = (
+                [s for s in INITIATIVE_SEEDS if s not in self.recent_seeds] or INITIATIVE_SEEDS
+            )
+            seed = random.choice(available_seeds)
+            self.recent_seeds.append(seed)
             reason = (
                 f"hazard_prob_hit (p={p_tick:.4f}, mean={current_interval:.1f}s, roll={roll:.4f})"
             )
