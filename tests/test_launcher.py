@@ -7,7 +7,12 @@ from daemon.launcher import AppLauncher
 
 def test_app_launcher_resolve_alias() -> None:
     # Known alias checks
-    assert AppLauncher.resolve_app_command("telegram") is not None
+    assert AppLauncher.resolve_app_command("telegram") in (
+        "/usr/bin/Telegram",
+        "Telegram",
+        "telegram",
+        "org.telegram.desktop",
+    )
     assert AppLauncher.resolve_app_command("телеграм") is not None
     assert AppLauncher.resolve_app_command("kitty") is not None
     assert AppLauncher.resolve_app_command("терминал") is not None
