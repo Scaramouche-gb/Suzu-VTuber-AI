@@ -12,9 +12,31 @@ logger = logging.getLogger(__name__)
 
 # Common aliases mapped to executable names or desktop file IDs
 APP_ALIASES: dict[str, list[str]] = {
-    "telegram": ["org.telegram.desktop", "telegram-desktop", "ayugram-desktop"],
-    "телеграм": ["org.telegram.desktop", "telegram-desktop"],
-    "телега": ["org.telegram.desktop", "telegram-desktop"],
+    "telegram": [
+        "/usr/bin/Telegram",
+        "Telegram",
+        "telegram",
+        "telegram-desktop",
+        "org.telegram.desktop.desktop",
+        "org.telegram.desktop",
+        "ayugram-desktop",
+    ],
+    "телеграм": [
+        "/usr/bin/Telegram",
+        "Telegram",
+        "telegram",
+        "telegram-desktop",
+        "org.telegram.desktop.desktop",
+        "org.telegram.desktop",
+    ],
+    "телега": [
+        "/usr/bin/Telegram",
+        "Telegram",
+        "telegram",
+        "telegram-desktop",
+        "org.telegram.desktop.desktop",
+        "org.telegram.desktop",
+    ],
     "zed": ["/home/scaramouche/.local/bin/zed", "dev.zed.Zed", "zed"],
     "зед": ["/home/scaramouche/.local/bin/zed", "dev.zed.Zed", "zed"],
     "kitty": ["kitty"],
@@ -63,6 +85,9 @@ class AppLauncher:
                 cand_desktop = Path(d) / f"{candidate}.desktop"
                 if cand_desktop.is_file():
                     return candidate
+                direct_desktop = Path(d) / candidate
+                if direct_desktop.is_file():
+                    return candidate
 
         return None
 
@@ -77,9 +102,10 @@ class AppLauncher:
             return False, f"Не нашла приложение «{app_name}»"
 
         try:
-            # Prefer gtk-launch if target looks like a desktop ID or exists in desktop dirs
-            is_desktop_id = "." in target and not os.path.isabs(target)
-            if is_desktop_id and shutil.which("gtk-launch"):
+            # Prefer direct execution if target is in PATH or absolute path
+            if os.path.isabs(target) or shutil.which(target):
+                cmd = [target]
+            elif "." in target and shutil.which("gtk-launch"):
                 cmd = ["gtk-launch", target]
             else:
                 cmd = [target]
