@@ -132,18 +132,43 @@ async def infer(
         in_f.write(audio_bytes)
 
     out_path = in_path + "_converted.wav"
+    mp3_path = in_path + "_converted.mp3"
     try:
         await asyncio.to_thread(_run_inference, in_path, out_path)
         if not await anyio.Path(out_path).is_file():
             raise HTTPException(status_code=500, detail="Inference output not created")
 
-        converted_bytes = await anyio.Path(out_path).read_bytes()
-        return Response(content=converted_bytes, media_type="audio/wav")
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            out_path,
+            "-codec:a",
+            "libmp3lame",
+            "-qscale:a",
+            "2",
+            mp3_path,
+        ]
+        proc = await asyncio.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
+
+        if await anyio.Path(mp3_path).is_file():
+            converted_bytes = await anyio.Path(mp3_path).read_bytes()
+            media_type = "audio/mpeg"
+        else:
+            converted_bytes = await anyio.Path(out_path).read_bytes()
+            media_type = "audio/wav"
+
+        return Response(content=converted_bytes, media_type=media_type)
     except Exception as exc:
         logger.exception("Inference failed")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     finally:
-        for p in (in_path, out_path):
+        for p in (in_path, out_path, mp3_path):
             pth = Path(p)
             if pth.is_file():
                 try:

@@ -21,7 +21,7 @@ class RVCVoiceConverter:
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=4.0)
+                timeout=aiohttp.ClientTimeout(total=8.0)
             )
         return self._session
 

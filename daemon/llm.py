@@ -202,6 +202,7 @@ class LLMClient:
             "messages": messages,
             "max_tokens": self.cfg.max_tokens,
             "stream": True,
+            "num_retries": 0,
         }
         if "claude" not in model.lower() and self.cfg.temperature != 1.0:
             kwargs["temperature"] = self.cfg.temperature
