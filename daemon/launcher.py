@@ -168,7 +168,10 @@ class AppLauncher:
 
     @staticmethod
     async def _get_focused_app() -> str:
-        """Query currently focused window app_id via driftwm IPC."""
+        """Query currently focused window app_id via driftwm IPC.
+
+        If the overlay currently holds focus, restores focus to the active user window.
+        """
         try:
             proc = await asyncio.create_subprocess_exec(
                 "driftwm",
@@ -179,9 +182,47 @@ class AppLauncher:
             )
             stdout, _ = await proc.communicate()
             if proc.returncode == 0 and stdout:
-                return stdout.decode().strip().lower()
-        except (OSError, RuntimeError):
-            pass
+                focused = stdout.decode().strip().lower()
+                if "vtuber-overlay" in focused:
+                    # Overlay stole focus: find the top un-suspended user window and refocus it
+                    state_proc = await asyncio.create_subprocess_exec(
+                        "driftwm",
+                        "msg",
+                        "state",
+                        "--json",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    state_out, _ = await state_proc.communicate()
+                    if state_proc.returncode == 0 and state_out:
+                        import json
+
+                        data = json.loads(state_out.decode("utf-8", errors="ignore"))
+                        windows = data.get("Ok", {}).get("State", {}).get("windows", [])
+                        for w in windows:
+                            if (
+                                not w.get("suspended")
+                                and not w.get("is_widget")
+                                and "vtuber-overlay" not in w.get("app_id", "").lower()
+                            ):
+                                win_id = w.get("id")
+                                app_id = w.get("app_id", "").lower()
+                                if win_id is not None:
+                                    f_proc = await asyncio.create_subprocess_exec(
+                                        "driftwm",
+                                        "msg",
+                                        "focus",
+                                        "--id",
+                                        str(win_id),
+                                        stdout=asyncio.subprocess.DEVNULL,
+                                        stderr=asyncio.subprocess.DEVNULL,
+                                    )
+                                    await f_proc.wait()
+                                    await asyncio.sleep(0.06)
+                                return app_id
+                return focused
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.debug("[AppLauncher] Error querying focused app: %s", exc)
         return ""
 
     @classmethod

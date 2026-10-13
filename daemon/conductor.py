@@ -252,8 +252,17 @@ class Conductor:
         elif cmd == "say":
             text = args.get("text", "")
             if text:
-                chunk = SentenceChunk(text=text)
-                await self._dispatch_sentence_chunk(chunk)
+                parser = TagParser()
+                splitter = SentenceSplitter()
+                items = parser.feed(text) + parser.flush()
+                for item in items:
+                    if isinstance(item, str):
+                        for chunk in splitter.feed(item):
+                            await self._dispatch_sentence_chunk(chunk)
+                    else:
+                        await self._handle_tag(item, splitter)
+                for chunk in splitter.flush():
+                    await self._dispatch_sentence_chunk(chunk)
 
         elif cmd == "ask":
             text = args.get("text", "")

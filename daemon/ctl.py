@@ -21,7 +21,7 @@ def _request_json(
     req = urllib.request.Request(url, data=encoded_data, headers=headers, method=method)
 
     try:
-        with urllib.request.urlopen(req, timeout=5.0) as resp:
+        with urllib.request.urlopen(req, timeout=30.0) as resp:
             content = resp.read().decode("utf-8")
             return json.loads(content)
     except urllib.error.URLError as exc:
