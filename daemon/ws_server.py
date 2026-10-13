@@ -225,4 +225,12 @@ def setup_routes(app: web.Application, ws_server: WebSocketServer) -> None:
 
     # Static build of renderer if dist exists
     if RENDERER_DIST_DIR.exists():
-        app.router.add_static("/", path=RENDERER_DIST_DIR, name="static", show_index=True)
+        index_file = RENDERER_DIST_DIR / "index.html"
+        if index_file.exists():
+            async def handle_root(request: web.Request) -> web.FileResponse:
+                return web.FileResponse(index_file)
+
+            app.router.add_get("/", handle_root)
+            app.router.add_get("/index.html", handle_root)
+
+        app.router.add_static("/", path=RENDERER_DIST_DIR, name="static", show_index=False)

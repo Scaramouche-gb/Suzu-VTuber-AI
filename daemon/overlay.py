@@ -12,7 +12,7 @@ os.environ.setdefault(
 )
 
 
-def run_overlay(url: str = "http://127.0.0.1:8765/?fit=bust", width: int = 420, height: int = 720) -> None:
+def run_overlay(url: str = "http://127.0.0.1:8765/index.html?fit=bust", width: int = 420, height: int = 720) -> None:
     try:
         from PyQt6.QtCore import Qt, QUrl
         from PyQt6.QtWebEngineCore import QWebEngineSettings
@@ -64,5 +64,5 @@ def run_overlay(url: str = "http://127.0.0.1:8765/?fit=bust", width: int = 420, 
 
 
 if __name__ == "__main__":
-    target_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/?fit=bust"
+    target_url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8765/index.html?fit=bust"
     run_overlay(target_url)

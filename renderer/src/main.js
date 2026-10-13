@@ -18,6 +18,10 @@ avatar.setFit(fitMode, scale, yOffset);
 
 const emotions = new EmotionManager();
 const lipsync = new LipsyncManager();
+// By default daemon plays audio directly via PipeWire mpv; lipsync only calculates mouth movement
+const desktopAudio = params.get('desktop_audio') !== '0';
+lipsync.muteOutput = desktopAudio;
+
 const gestures = new GestureManager();
 const ws = new VTuberWSClient();
 

@@ -453,8 +453,8 @@ class Conductor:
 
         await self.ws.broadcast(say_payload)
 
-        # Fallback desktop audio playback when running headless or no web client is connected
-        if audio_url and len(self.ws.clients) == 0:
+        # Direct desktop audio playback via PipeWire (guarantees voice output regardless of browser state)
+        if audio_url:
             audio_path = get_audio_path(utt_id)
             if audio_path.exists():
                 asyncio.create_task(self._play_desktop_audio(audio_path))

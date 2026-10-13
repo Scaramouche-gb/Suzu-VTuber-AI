@@ -14,6 +14,7 @@ export class LipsyncManager {
     this.currentUtteranceId = null;
 
     this.queue = [];
+    this.muteOutput = false;
 
     // Callbacks
     this.onPlaybackStarted = null;
@@ -86,7 +87,9 @@ export class LipsyncManager {
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(this.analyser);
-      this.analyser.connect(this.audioContext.destination);
+      if (!this.muteOutput) {
+        this.analyser.connect(this.audioContext.destination);
+      }
 
       this.currentSource = source;
 
