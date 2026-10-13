@@ -245,6 +245,11 @@ def save_audio_file(utterance_id: str, audio_bytes: bytes) -> Path:
     return file_path
 
 
+def get_audio_path(utterance_id: str) -> Path:
+    """Return cache file path for an utterance ID."""
+    return AUDIO_CACHE_DIR / f"{utterance_id}.mp3"
+
+
 def cleanup_audio_cache(max_age_s: float = 3600.0) -> int:
     """Remove audio cache files older than max_age_s (default: 1 hour)."""
     if not AUDIO_CACHE_DIR.exists():

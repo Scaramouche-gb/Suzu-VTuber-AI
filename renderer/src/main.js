@@ -29,8 +29,24 @@ lipsync.onPlaybackEnded = (id) => {
   ws.sendPlaybackEnded(id);
 };
 
+// Unlock Web Audio context on any user interaction
+const unlockAudio = () => {
+  lipsync.ensureContext();
+};
+window.addEventListener('pointerdown', unlockAudio, { passive: true });
+window.addEventListener('keydown', (e) => {
+  unlockAudio();
+  if (e.key === 'f' || e.key === 'F') {
+    avatar.flip();
+  }
+});
+window.addEventListener('dblclick', () => {
+  avatar.flip();
+});
+
 // Handle clicks on avatar
 canvas.addEventListener('click', (e) => {
+  unlockAudio();
   const rect = canvas.getBoundingClientRect();
   const yRatio = (e.clientY - rect.top) / rect.height;
   const region = yRatio < 0.4 ? 'head' : 'body';
@@ -56,6 +72,7 @@ ws.on('state', (data) => {
 });
 
 ws.on('say', (data) => {
+  unlockAudio();
   if (data.emotion) {
     emotions.setEmotion(data.emotion, data.intensity || 0.8, 0);
   }

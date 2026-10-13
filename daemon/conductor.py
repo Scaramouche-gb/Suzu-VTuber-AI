@@ -7,6 +7,7 @@ import base64
 import datetime
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -26,7 +27,7 @@ from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.sentence import SentenceChunk, SentenceSplitter
 from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
-from daemon.tts import BaseTTSEngine, save_audio_file
+from daemon.tts import BaseTTSEngine, get_audio_path, save_audio_file
 from daemon.ws_server import WebSocketServer
 
 logger = logging.getLogger(__name__)
@@ -451,6 +452,27 @@ class Conductor:
             say_payload["audio_url"] = audio_url
 
         await self.ws.broadcast(say_payload)
+
+        # Fallback desktop audio playback when running headless or no web client is connected
+        if audio_url and len(self.ws.clients) == 0:
+            audio_path = get_audio_path(utt_id)
+            if audio_path.exists():
+                asyncio.create_task(self._play_desktop_audio(audio_path))
+
+    async def _play_desktop_audio(self, audio_path: Path) -> None:
+        """Play synthesized audio directly through PipeWire when no web client is connected."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "mpv",
+                "--no-video",
+                "--really-quiet",
+                str(audio_path),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+        except (OSError, RuntimeError) as exc:
+            logger.debug("Desktop audio fallback failed: %s", exc)
 
     async def _initiative_loop(self) -> None:
         """Periodic background ticker evaluating initiative and idle liveliness."""

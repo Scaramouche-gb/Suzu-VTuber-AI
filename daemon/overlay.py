@@ -2,34 +2,49 @@
 
 from __future__ import annotations
 
+import os
 import sys
+
+# Allow WebEngine transparency and enable audio autoplay without user gesture
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--enable-transparent-visuals --disable-gpu-vsync --autoplay-policy=no-user-gesture-required",
+)
 
 
 def run_overlay(url: str = "http://127.0.0.1:8765/?fit=bust", width: int = 420, height: int = 720) -> None:
     try:
         from PyQt6.QtCore import Qt, QUrl
+        from PyQt6.QtWebEngineCore import QWebEngineSettings
         from PyQt6.QtWebEngineWidgets import QWebEngineView
         from PyQt6.QtWidgets import QApplication
     except ImportError:
-        print("\n[!] Ошибка: Для запуска оверлея требуется пакет python-pyqt6-webengine.")
-        print("Установи его командой: sudo pacman -S python-pyqt6-webengine\n")
+        print("\n[!] Ошибка: Для запуска оверлея требуется пакет PyQt6 и PyQt6-WebEngine.")
+        print("Установи их командой: uv add PyQt6 PyQt6-WebEngine\n")
         sys.exit(1)
 
     app = QApplication(sys.argv)
+    # Set desktop file name for Wayland app_id matching in driftwm window rules
     app.setApplicationName("vtuber-overlay")
     app.setDesktopFileName("vtuber-overlay")
 
     view = QWebEngineView()
     view.setWindowTitle("Suzu VTuber")
-    view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    view.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     view.setStyleSheet("background: transparent;")
     view.page().setBackgroundColor(Qt.GlobalColor.transparent)
 
-    # Wayland transparent always-on-top frameless window flags
+    # Audio autoplay and rendering settings
+    settings = view.settings()
+    settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False)
+    settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
+    settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
+    settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, False)
+
+    # Frameless always-on-top window for Wayland / driftwm
     view.setWindowFlags(
         Qt.WindowType.FramelessWindowHint
         | Qt.WindowType.WindowStaysOnTopHint
-        | Qt.WindowType.SubWindow
     )
 
     # Position in bottom-right corner

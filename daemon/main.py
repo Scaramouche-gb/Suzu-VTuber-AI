@@ -133,15 +133,10 @@ async def run_server(
     text_mode: bool = False,
     dry_run: bool = False,
     no_mic: bool = False,
+    with_overlay: bool = False,
 ) -> None:
     """Run aiohttp application with graceful shutdown and optional CLI loop."""
     app, ws_server = create_app(cfg, bus)
-    runner = web.AppRunner(app)
-    await runner.setup()
-
-    site = web.TCPSite(runner, host=cfg.server.host, port=cfg.server.port)
-    await site.start()
-    logger.info("Daemon web server listening on http://%s:%d", cfg.server.host, cfg.server.port)
 
     # Initialize STT, Audio In and Vision
     stt = MockSTT() if dry_run else WhisperSTT(cfg.stt)
@@ -167,11 +162,19 @@ async def run_server(
         initiative=initiative,
         memory=memory,
     )
+
     app["conductor"] = conductor
     app["audio_in"] = audio_in
     app["vision"] = vision
     app["initiative"] = initiative
     app["memory"] = memory
+
+    runner = web.AppRunner(app)
+    await runner.setup()
+
+    site = web.TCPSite(runner, host=cfg.server.host, port=cfg.server.port)
+    await site.start()
+    logger.info("Daemon web server listening on http://%s:%d", cfg.server.host, cfg.server.port)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -187,6 +190,14 @@ async def run_server(
         except (NotImplementedError, RuntimeError):
             pass
 
+    overlay_proc: asyncio.subprocess.Process | None = None
+    if with_overlay:
+        overlay_proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-m",
+            "daemon.overlay",
+        )
+
     repl_task: asyncio.Task[None] | None = None
     if text_mode:
         repl_task = asyncio.create_task(text_repl_loop(conductor, stop_event))
@@ -194,6 +205,8 @@ async def run_server(
     try:
         await stop_event.wait()
     finally:
+        if overlay_proc and overlay_proc.returncode is None:
+            overlay_proc.terminate()
         if repl_task and not repl_task.done():
             repl_task.cancel()
         if not no_mic:
@@ -212,6 +225,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--text", action="store_true", help="Run in interactive text mode (Phase 2)")
     parser.add_argument("--dry-run-llm", action="store_true", help="Mock LLM responses for testing")
     parser.add_argument("--no-mic", action="store_true", help="Disable microphone input capture")
+    parser.add_argument("--overlay", action="store_true", help="Launch desktop transparent overlay window")
     return parser.parse_args()
 
 
@@ -234,6 +248,7 @@ def main() -> None:
                 text_mode=args.text,
                 dry_run=args.dry_run_llm,
                 no_mic=args.no_mic,
+                with_overlay=args.overlay,
             )
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
