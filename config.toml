@@ -20,8 +20,8 @@ max_usd_per_day = 10.0
 [stt]
 engine = "faster-whisper"
 model = "small"
-device = "cuda"
-compute_type = "float16"
+device = "cpu"
+compute_type = "int8"
 language = "ru"
 initial_prompt = "Разговор с подругой по имени Сузу."
 

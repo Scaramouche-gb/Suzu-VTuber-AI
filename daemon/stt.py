@@ -74,19 +74,33 @@ class WhisperSTT:
             return ""
 
         model = self.load_model()
-
         language = self.cfg.language if self.cfg.language else None
-        segments, info = model.transcribe(
-            audio,
-            language=language,
-            vad_filter=False,  # Audio is already pre-filtered by Silero VAD
-            beam_size=1,
-            initial_prompt=self.cfg.initial_prompt,
-            condition_on_previous_text=False,
-        )
+
+        try:
+            segments, info = model.transcribe(
+                audio,
+                language=language,
+                vad_filter=False,  # Audio is already pre-filtered by Silero VAD
+                beam_size=1,
+                initial_prompt=self.cfg.initial_prompt,
+                condition_on_previous_text=False,
+            )
+            segment_list = list(segments)
+        except (RuntimeError, OSError) as exc:
+            logger.warning("Whisper transcription failed on %s: %s. Falling back to cpu/int8", self.cfg.device, exc)
+            self._model = WhisperModel(self.cfg.model, device="cpu", compute_type="int8")
+            segments, info = self._model.transcribe(
+                audio,
+                language=language,
+                vad_filter=False,
+                beam_size=1,
+                initial_prompt=self.cfg.initial_prompt,
+                condition_on_previous_text=False,
+            )
+            segment_list = list(segments)
 
         valid_texts: list[str] = []
-        for segment in segments:
+        for segment in segment_list:
             text = segment.text.strip()
             if not text:
                 continue
