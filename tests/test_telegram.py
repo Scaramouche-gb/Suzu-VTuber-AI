@@ -112,6 +112,61 @@ async def test_telegram_bridge_resolve_target_vision(bus: EventBus, tg_config: T
 
 
 @pytest.mark.asyncio
+async def test_telegram_bridge_resolve_target_bidi_multiaccount(
+    bus: EventBus, tg_config: TelegramConfig
+) -> None:
+    """Verify bidi Unicode isolates and multi-account '@ User (ID)' format match the peer, avoiding self."""
+    mock_vision = MagicMock()
+    mock_vision.active_app = "org.telegram.desktop"
+    mock_vision.active_title = "\u200e\u2068Эмилька\u2069 @ \u200e\u2068Grobofhik\u2069 (10672310)"
+
+    bridge = TelegramBridge(tg_config, bus, vision=mock_vision)
+    bridge._telethon_client = AsyncMock()
+    bridge._telethon_client.is_user_authorized.return_value = True
+
+    # Dialog 1: Self account (Grobofhik) - must be ignored!
+    self_dialog = MagicMock()
+    self_dialog.name = "Grobofhik"
+    self_dialog.entity = MagicMock(is_self=True, username="Grobofhik")
+
+    # Dialog 2: Target peer (Эмилька)
+    target_dialog = MagicMock()
+    target_dialog.name = "Эмилька"
+    target_peer_entity = MagicMock(is_self=False, username="emilka", id=1499264296)
+    target_dialog.entity = target_peer_entity
+
+    bridge._telethon_client.get_dialogs.return_value = [self_dialog, target_dialog]
+
+    target = await bridge.resolve_target()
+    assert target == target_peer_entity
+    assert target.id == 1499264296
+
+
+@pytest.mark.asyncio
+async def test_telegram_bridge_resolve_target_fallback_to_recent(
+    bus: EventBus, tg_config: TelegramConfig
+) -> None:
+    """Verify fallback to recent incoming private chat if window title does not resolve a dialog."""
+    import time
+
+    mock_vision = MagicMock()
+    mock_vision.active_app = "org.telegram.desktop"
+    mock_vision.active_title = "Telegram"
+
+    bridge = TelegramBridge(tg_config, bus, vision=mock_vision)
+    bridge._telethon_client = AsyncMock()
+    bridge._telethon_client.is_user_authorized.return_value = True
+    bridge._telethon_client.get_dialogs.return_value = []
+
+    # Emulate recent incoming message from peer
+    bridge._last_incoming_chat_id = 1499264296
+    bridge._last_incoming_time = time.monotonic() - 10.0
+
+    target = await bridge.resolve_target()
+    assert target == 1499264296
+
+
+@pytest.mark.asyncio
 async def test_telegram_bot_send_message(bus: EventBus, tg_config: TelegramConfig) -> None:
     """Verify Bot API sends message with correct JSON payload."""
     bridge = TelegramBridge(tg_config, bus)

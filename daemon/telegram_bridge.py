@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +57,8 @@ class TelegramBridge:
         self._poll_task: asyncio.Task[None] | None = None
         self._running = False
         self._last_update_id = 0
+        self._last_incoming_chat_id: int | None = None
+        self._last_incoming_time: float = 0.0
 
     @property
     def is_bot_available(self) -> bool:
@@ -146,8 +150,30 @@ class TelegramBridge:
             logger.error("Failed to initialize Telethon Userbot: %s", exc)
             self._telethon_client = None
 
+    @staticmethod
+    def _clean_window_title(window_title: str) -> str:
+        """Strip bidi isolates, Telegram Desktop account prefixes/suffixes, and unread counters."""
+        if not window_title:
+            return ""
+        # 1. Strip Unicode directional formatting and bidi isolate characters
+        clean = re.sub(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]", "", window_title).strip()
+
+        # 2. Telegram Desktop multi-account format: "<Chat Name> @ <Account Name>"
+        # e.g., "Эмилька @ Grobofhik" -> "Эмилька"
+        if " @ " in clean:
+            clean = clean.split(" @ ")[0].strip()
+
+        # 3. Standard Telegram window suffixes
+        for suffix in (" - Telegram", " — Telegram"):
+            if clean.endswith(suffix):
+                clean = clean[: -len(suffix)].strip()
+
+        # 4. Strip trailing parentheses with IDs or counts: e.g., "(10672310)" or "(2)"
+        clean = re.sub(r"\s*\(\d+\)$", "", clean).strip()
+        return clean
+
     async def resolve_target(self, fallback_title: str | None = None) -> Any:
-        """Determine target Telegram chat_id or entity based on screen context or config default."""
+        """Determine target Telegram chat_id or entity based on screen context, recent chat or config default."""
         title = fallback_title
         if not title and self.vision:
             app = getattr(self.vision, "active_app", "").lower()
@@ -161,7 +187,12 @@ class TelegramBridge:
                 logger.info("Matched active screen dialog '%s' to Telegram entity: %s", title, matched)
                 return matched
 
-        # 2. Fallback to default chat ID
+        # 2. Fallback to recent private incoming chat if active within the last 5 minutes
+        if self._last_incoming_chat_id and (time.monotonic() - self._last_incoming_time < 300):
+            logger.info("Using recent incoming Telegram chat_id: %s", self._last_incoming_chat_id)
+            return self._last_incoming_chat_id
+
+        # 3. Fallback to default chat ID
         if self.cfg.default_chat_id:
             return self.cfg.default_chat_id
 
@@ -172,21 +203,37 @@ class TelegramBridge:
         if not self._telethon_client:
             return None
 
-        # Clean Telegram Desktop title format (e.g., "Ivan", "Dev Group", "Telegram")
-        clean_title = window_title.strip()
-        for suffix in (" - Telegram", " — Telegram"):
-            if clean_title.endswith(suffix):
-                clean_title = clean_title[: -len(suffix)].strip()
-
+        clean_title = self._clean_window_title(window_title)
         if not clean_title or clean_title.lower() in ("telegram", "telegram desktop"):
             return None
 
+        clean_lower = clean_title.lower()
         try:
-            dialogs = await self._telethon_client.get_dialogs(limit=30)
-            clean_lower = clean_title.lower()
+            dialogs = await self._telethon_client.get_dialogs(limit=50)
+
+            # Pass 1: Exact matches against dialog name or username (ignoring self unless requested)
             for dlg in dialogs:
+                is_self = bool(getattr(dlg.entity, "is_self", False))
+                if is_self and clean_lower not in ("saved messages", "избранное"):
+                    continue
+
                 name = (dlg.name or "").strip().lower()
-                if clean_lower in name or name in clean_lower:
+                username = (getattr(dlg.entity, "username", "") or "").lower()
+                if clean_lower == name or (username and clean_lower == username):
+                    return dlg.entity
+
+            # Pass 2: Fuzzy / substring matches (clean_lower in name, or name in clean_lower if len >= 3)
+            for dlg in dialogs:
+                is_self = bool(getattr(dlg.entity, "is_self", False))
+                if is_self and clean_lower not in ("saved messages", "избранное"):
+                    continue
+
+                name = (dlg.name or "").strip().lower()
+                if not name:
+                    continue
+                if clean_lower in name:
+                    return dlg.entity
+                if len(name) >= 3 and name in clean_lower:
                     return dlg.entity
         except Exception as exc:  # noqa: BLE001
             logger.debug("Failed searching dialogs: %s", exc)
@@ -428,6 +475,10 @@ class TelegramBridge:
                 is_private,
                 text[:60],
             )
+            if is_private and chat_id:
+                self._last_incoming_chat_id = chat_id
+                self._last_incoming_time = time.monotonic()
+
             await self.bus.publish(
                 TelegramMessage(
                     chat_id=chat_id,
