@@ -38,7 +38,7 @@ engine = "silero"
 voice = "ru-RU-SvetlanaNeural"
 rate = "+5%"
 pitch = "+2Hz"
-pitch_shift = 1.15
+pitch_shift = 1.04
 
 [vision]
 enabled = true

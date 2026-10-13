@@ -209,48 +209,43 @@ class SileroTTSEngine(BaseTTSEngine):
             audio = model.apply_tts(text=text, speaker="kseniya", sample_rate=24000)
             pcm_data = (audio.numpy() * 32767).astype(np.int16).tobytes()
 
-            base_shift = getattr(self.cfg, "pitch_shift", 1.15)
+            base_shift = getattr(self.cfg, "pitch_shift", 1.04)
             scale = min(1.0, max(0.0, intensity))
             emo = (emotion or "neutral").lower()
 
             shift = base_shift
             tempo_factor = 1.0
-            volume = 1.20
-            eq = ""
+            volume = 1.25
+            eq = ",equalizer=f=300:width_type=h:width=150:g=2.2,lowpass=f=9200"
 
             if emo in ("happy", "joy"):
-                shift = base_shift + 0.08 * scale
-                tempo_factor = 1.0 + 0.08 * scale
-                volume = 1.25
-                eq = ",equalizer=f=3200:width_type=h:width=1200:g=2.5"
+                shift = base_shift + 0.025 * scale
+                tempo_factor = 1.0 + 0.04 * scale
             elif emo in ("playful", "silly", "smug"):
-                shift = base_shift + 0.09 * scale
-                tempo_factor = 1.0 + 0.07 * scale
-                volume = 1.25
+                shift = base_shift + 0.03 * scale
+                tempo_factor = 1.0 + 0.04 * scale
             elif emo in ("surprised", "excited"):
-                shift = base_shift + 0.12 * scale
-                tempo_factor = 1.0 + 0.10 * scale
-                volume = 1.30
+                shift = base_shift + 0.045 * scale
+                tempo_factor = 1.0 + 0.06 * scale
             elif emo in ("angry", "annoyed", "pout"):
-                shift = base_shift - 0.04 * scale
-                tempo_factor = 1.0 + 0.12 * scale
-                volume = 1.35
-                eq = ",equalizer=f=1200:width_type=h:width=500:g=3.0"
+                shift = base_shift - 0.02 * scale
+                tempo_factor = 1.0 + 0.06 * scale
+                volume = 1.30
             elif emo in ("sad", "worried", "sorrow"):
-                shift = base_shift - 0.06 * scale
-                tempo_factor = 1.0 - 0.12 * scale
-                volume = 1.08
+                shift = base_shift - 0.03 * scale
+                tempo_factor = 1.0 - 0.06 * scale
+                volume = 1.10
             elif emo in ("sleepy", "tired"):
-                shift = base_shift - 0.05 * scale
-                tempo_factor = 1.0 - 0.15 * scale
+                shift = base_shift - 0.025 * scale
+                tempo_factor = 1.0 - 0.10 * scale
                 volume = 1.05
             elif emo in ("relaxed", "calm"):
-                shift = base_shift - 0.02 * scale
-                tempo_factor = 1.0 - 0.04 * scale
+                shift = base_shift - 0.01 * scale
+                tempo_factor = 1.0 - 0.02 * scale
                 volume = 1.15
             elif emo in ("curious", "thinking", "doubt"):
-                shift = base_shift + 0.04 * scale
-                tempo_factor = 1.02
+                shift = base_shift + 0.015 * scale
+                tempo_factor = 1.01
                 volume = 1.20
 
             final_tempo = max(0.6, min(1.8, (1.0 / shift) * tempo_factor))

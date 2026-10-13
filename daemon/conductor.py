@@ -27,6 +27,7 @@ from daemon.llm import LLMClient
 from daemon.memory import MemoryManager
 from daemon.sentence import SentenceChunk, SentenceSplitter
 from daemon.tagparser import EmotionTag, GestureTag, LookTag, SilentTag, TagParser
+from daemon.tencent_bridge import TencentMemoryBridge
 from daemon.tts import BaseTTSEngine, get_audio_path, save_audio_file
 from daemon.ws_server import WebSocketServer
 
@@ -55,6 +56,8 @@ class Conductor:
         self.vision = vision
         self.initiative = initiative or InitiativeManager()
         self.memory = memory
+        self.tencent = TencentMemoryBridge()
+        asyncio.create_task(self.tencent.initialize())
 
         self.state = "idle"
         self.history: list[dict[str, str]] = []
@@ -92,6 +95,8 @@ class Conductor:
             self._current_gen_task.cancel()
         if self.memory:
             await self.memory.close()
+        if self.tencent:
+            await self.tencent.close()
 
     def set_state(self, new_state: str) -> None:
         """Update and broadcast state."""
@@ -309,6 +314,18 @@ class Conductor:
             episode_records = await self.memory.get_recent_episodes(limit=5)
             episodes_list = [e.summary for e in episode_records]
 
+        # Semantic retrieval of project knowledge from TencentDB Agent Memory
+        project_notes = None
+        if self.tencent:
+            active_app = self.vision.active_app if self.vision else ""
+            active_title = self.vision.active_title if self.vision else ""
+            project_notes = await self.tencent.search_project_context(
+                query=user_text,
+                active_app=active_app,
+                active_title=active_title,
+                limit=3,
+            )
+
         if is_proactive:
             # Proactive turns have access to memory facts and recent context!
             messages = self.llm.build_messages(
@@ -318,6 +335,7 @@ class Conductor:
                 facts=facts_list,
                 episodes=episodes_list,
                 image_base64=image_base64,
+                project_notes=project_notes,
             )
             target_model = self.llm.cfg.fast_model
         else:
@@ -328,6 +346,7 @@ class Conductor:
                 facts=facts_list,
                 episodes=episodes_list,
                 image_base64=image_base64,
+                project_notes=project_notes,
             )
             target_model = self.llm.cfg.chat_model
 
