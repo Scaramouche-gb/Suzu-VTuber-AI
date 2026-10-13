@@ -262,6 +262,20 @@ async def run_server(
                     "--port",
                     "5055",
                 )
+                logger.info("Waiting for XTTS sidecar model to initialize on GPU...")
+                for _ in range(40):
+                    await asyncio.sleep(1.0)
+                    try:
+                        async with aiohttp.ClientSession() as s, s.get(
+                            health_url, timeout=aiohttp.ClientTimeout(total=1.0)
+                        ) as r:
+                            if r.status == 200:
+                                data = await r.json()
+                                if data.get("status") == "ready":
+                                    logger.info("XTTS sidecar model loaded and ready on port 5055")
+                                    break
+                    except (aiohttp.ClientError, TimeoutError, OSError):
+                        pass
 
     async def _periodic_cleanup_loop() -> None:
         while not stop_event.is_set():

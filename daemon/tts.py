@@ -126,27 +126,24 @@ def apply_emotion_mastering(
 
     # Softer volume levels and nuanced emotional curves
     if emo == "whisper":
-        vol = max(0.50, 0.62 - 0.08 * scale)
+        vol = max(0.42, 0.50 - 0.08 * scale)
         filters.append("highpass=f=200,lowshelf=f=500:g=-4.0,equalizer=f=4500:width_type=q:width=1.5:g=1.5")
     elif emo in ("excited", "surprised"):
-        vol = min(0.92, 0.82 + 0.08 * scale)
+        vol = min(0.78, 0.70 + 0.08 * scale)
         filters.append("equalizer=f=3500:width_type=q:width=1.5:g=1.0")
     elif emo in ("happy", "joy", "laugh", "playful", "silly", "smug"):
-        vol = min(0.88, 0.80 + 0.06 * scale)
+        vol = min(0.74, 0.68 + 0.06 * scale)
         filters.append("equalizer=f=3000:width_type=q:width=1.5:g=0.8")
     elif emo in ("sad", "sorrow", "worried", "pout"):
-        vol = max(0.65, 0.74 - 0.08 * scale)
+        vol = max(0.52, 0.60 - 0.08 * scale)
         filters.append("equalizer=f=2800:width_type=q:width=1.5:g=-1.5")
     elif emo in ("angry", "annoyed"):
-        vol = min(0.90, 0.82 + 0.06 * scale)
+        vol = min(0.76, 0.70 + 0.06 * scale)
         filters.append("equalizer=f=2500:width_type=q:width=1.5:g=1.2")
     else:
-        vol = 0.78  # Comfortable, pleasant non-fatiguing volume
+        vol = 0.68  # Comfortable, pleasant non-fatiguing volume
 
     filters.append(f"volume={vol:.2f}")
-    # Smooth vocal leveling and peak limiter with -1.2 dB true-peak headroom
-    filters.append("compand=attacks=0.03:decays=0.15:points=-80/-80|-36/-26|-12/-8|0/-2:gain=0")
-    filters.append("alimiter=limit=0.88:attack=5:release=50:asc=1")
 
     af = ",".join(filters)
 
@@ -159,9 +156,7 @@ def apply_emotion_mastering(
             "-af",
             af,
             "-b:a",
-            "256k",
-            "-q:a",
-            "0",
+            "192k",
             "-f",
             "mp3",
             "pipe:1",
