@@ -1384,7 +1384,7 @@ class Conductor:
         try:
             audio_bytes = await self.tts.synthesize(voice_text, emotion="happy")
             if audio_bytes:
-                ok = await self.telegram.send_voice(audio_bytes, caption=voice_text)
+                ok = await self.telegram.send_voice(audio_bytes, caption=None)
                 if ok:
                     logger.info("[Telegram] Voice note successfully sent!")
         except Exception as exc:  # noqa: BLE001

@@ -61,6 +61,58 @@ export class LipsyncManager {
     }
   }
 
+  async preloadAudio(url) {
+    this.ensureContext();
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      await this.audioContext.resume();
+    }
+    const audioUrl = url.startsWith('http') ? url : `http://127.0.0.1:8765${url}`;
+    const response = await fetch(audioUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch audio from ${audioUrl}: ${response.statusText}`);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    return await this.audioContext.decodeAudioData(arrayBuffer);
+  }
+
+  playDecodedBuffer(audioBuffer, id, onEnded = null) {
+    this.ensureContext();
+    this.isPlaying = true;
+    this.currentUtteranceId = id;
+
+    const source = this.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(this.analyser);
+    if (this.gainNode) {
+      this.gainNode.gain.value = this.muteOutput ? 0.0 : 0.85;
+    }
+
+    this.currentSource = source;
+    if (this.onPlaybackStarted) {
+      this.onPlaybackStarted(id);
+    }
+
+    source.onended = () => {
+      try {
+        source.disconnect();
+        source.buffer = null;
+      } catch {}
+      if (this.currentSource === source) {
+        this.currentSource = null;
+      }
+      this.isPlaying = false;
+      this.currentUtteranceId = null;
+      this.currentVolume = 0.0;
+      if (onEnded) onEnded();
+      if (this.onPlaybackEnded) {
+        this.onPlaybackEnded(id);
+      }
+      this.playNext();
+    };
+
+    source.start(0);
+  }
+
   enqueue(item) {
     this.ensureContext();
     this.queue.push(item);

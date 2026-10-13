@@ -96,7 +96,16 @@ ws.on('record_round', async (data) => {
   const emotion = data.emotion || 'playful';
   const gesture = data.gesture || 'wave';
 
-  // Temporarily adjust camera for authentic selfie portrait "кружок" framing
+  // 1. Preload audio buffer first so video recording starts instantly without network latency
+  let audioBuffer;
+  try {
+    audioBuffer = await lipsync.preloadAudio(audioUrl);
+  } catch (err) {
+    console.error('Failed to preload round audio:', err);
+    return;
+  }
+
+  // 2. Adjust camera for selfie portrait "кружок" framing
   avatar.setFit('bust', 1.35, 0.08);
   avatar.setLookTarget('user');
   emotions.setEmotion(emotion, 0.9, 0);
@@ -145,28 +154,15 @@ ws.on('record_round', async (data) => {
     }
   };
 
+  // 3. Start video stream recording and audio buffer playback synchronously in the exact same millisecond
   mediaRecorder.start();
-
-  // Play audio through lipsync so mouth and facial expressions sync in real time
-  lipsync.enqueue({
-    id: `round_${recordId}`,
-    audioUrl: audioUrl,
-    emotion: emotion,
-    gesture: gesture,
+  lipsync.playDecodedBuffer(audioBuffer, `round_${recordId}`, () => {
+    setTimeout(() => {
+      if (mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+    }, 150); // 150ms grace to capture mouth closing
   });
-
-  const prevEnded = lipsync.onPlaybackEnded;
-  lipsync.onPlaybackEnded = (endedId, item) => {
-    if (endedId === `round_${recordId}`) {
-      setTimeout(() => {
-        if (mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-      }, 200); // 200ms grace to capture mouth closure
-      lipsync.onPlaybackEnded = prevEnded;
-    }
-    if (prevEnded) prevEnded(endedId, item);
-  };
 });
 
 ws.on('say', (data) => {

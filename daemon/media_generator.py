@@ -90,6 +90,8 @@ class MediaGenerator:
                 "yuv420p",
                 "-r",
                 "30",
+                "-fps_mode",
+                "cfr",
             ])
 
             if tmp_aud_path:
@@ -104,6 +106,8 @@ class MediaGenerator:
                     "64k",
                     "-ar",
                     "44100",
+                    "-af",
+                    "aresample=async=1",
                     "-shortest",
                 ])
             else:
