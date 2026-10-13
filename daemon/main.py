@@ -97,7 +97,7 @@ async def cors_middleware(request: web.Request, handler: Any) -> web.Response:
 
 def create_app(cfg: Config, bus: EventBus) -> tuple[web.Application, WebSocketServer]:
     """Create and configure aiohttp web application with WebSocket server."""
-    app = web.Application(middlewares=[cors_middleware])
+    app = web.Application(middlewares=[cors_middleware], client_max_size=64 * 1024 * 1024)
     app["config"] = cfg
     app["bus"] = bus
 
