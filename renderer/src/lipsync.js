@@ -48,6 +48,11 @@ export class LipsyncManager {
     this.analyser.smoothingTimeConstant = 0.25; // Snappy response to phonemes
     this.timeData = new Float32Array(this.analyser.fftSize);
     this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
+
+    this.gainNode = this.audioContext.createGain();
+    this.gainNode.gain.value = 0.85; // Pleasant, non-fatiguing volume
+    this.analyser.connect(this.gainNode);
+    this.gainNode.connect(this.audioContext.destination);
   }
 
   ensureContext() {
@@ -100,8 +105,8 @@ export class LipsyncManager {
       const source = this.audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(this.analyser);
-      if (!this.muteOutput) {
-        this.analyser.connect(this.audioContext.destination);
+      if (this.gainNode) {
+        this.gainNode.gain.value = this.muteOutput ? 0.0 : 0.85;
       }
 
       this.currentSource = source;

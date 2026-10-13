@@ -106,48 +106,49 @@ def build_silero_ssml(text: str, emotion: str, intensity: float = 1.0) -> str:
 def apply_emotion_mastering(
     audio_bytes: bytes, emotion: str, intensity: float = 1.0
 ) -> bytes:
-    """Master final post-TTS/post-RVC audio with acoustic EQ, presence, air, and volume dynamics."""
+    """Master post-TTS/post-RVC audio with clean acoustic EQ, de-essing, noise/aliasing filter, soft volume leveling, and zero-clipping limiter."""
     if not audio_bytes:
         return audio_bytes
     emo = (emotion or "neutral").lower()
     scale = min(1.0, max(0.0, intensity))
 
+    # Base clean vocal chain:
+    # 1. highpass=f=80: cuts subsonic rumble and plosives
+    # 2. lowpass=f=10500: cuts harsh neural vocoder hash/grit above 10.5kHz
+    # 3. equalizer=f=6000:width_type=q:width=2.0:g=-3.0: de-esser notch taming mic sibilance ('с', 'ш', 'ц')
+    # 4. equalizer=f=2200:width_type=q:width=1.5:g=1.2: warm vocal body and intimacy
+    filters = [
+        "highpass=f=80",
+        "lowpass=f=10500",
+        "equalizer=f=6000:width_type=q:width=2.0:g=-3.0",
+        "equalizer=f=2200:width_type=q:width=1.5:g=1.2",
+    ]
+
+    # Softer volume levels and nuanced emotional curves
     if emo == "whisper":
-        vol = max(0.55, 0.70 - 0.08 * scale)
-        af = (
-            "highpass=f=400,"
-            "lowshelf=f=650:g=-7.0,"
-            "treble=g=5.5:f=7500,"
-            f"volume={vol:.2f}"
-        )
+        vol = max(0.50, 0.62 - 0.08 * scale)
+        filters.append("highpass=f=200,lowshelf=f=500:g=-4.0,equalizer=f=4500:width_type=q:width=1.5:g=1.5")
     elif emo in ("excited", "surprised"):
-        vol = min(1.40, 1.22 + 0.12 * scale)
-        af = (
-            "treble=g=2.5:f=6500,"
-            "equalizer=f=3200:width_type=q:width=1.5:g=2.0,"
-            f"volume={vol:.2f}"
-        )
+        vol = min(0.92, 0.82 + 0.08 * scale)
+        filters.append("equalizer=f=3500:width_type=q:width=1.5:g=1.0")
     elif emo in ("happy", "joy", "laugh", "playful", "silly", "smug"):
-        vol = min(1.30, 1.16 + 0.08 * scale)
-        af = (
-            "treble=g=1.5:f=7000,"
-            "equalizer=f=3000:width_type=q:width=1.5:g=1.2,"
-            f"volume={vol:.2f}"
-        )
+        vol = min(0.88, 0.80 + 0.06 * scale)
+        filters.append("equalizer=f=3000:width_type=q:width=1.5:g=0.8")
     elif emo in ("sad", "sorrow", "worried", "pout"):
-        vol = max(0.75, 0.90 - 0.10 * scale)
-        af = (
-            "equalizer=f=2800:width_type=q:width=1.5:g=-2.0,"
-            f"volume={vol:.2f}"
-        )
+        vol = max(0.65, 0.74 - 0.08 * scale)
+        filters.append("equalizer=f=2800:width_type=q:width=1.5:g=-1.5")
     elif emo in ("angry", "annoyed"):
-        vol = min(1.35, 1.22 + 0.10 * scale)
-        af = (
-            "equalizer=f=2500:width_type=q:width=1.5:g=2.2,"
-            f"volume={vol:.2f}"
-        )
+        vol = min(0.90, 0.82 + 0.06 * scale)
+        filters.append("equalizer=f=2500:width_type=q:width=1.5:g=1.2")
     else:
-        af = "volume=1.05"
+        vol = 0.78  # Comfortable, pleasant non-fatiguing volume
+
+    filters.append(f"volume={vol:.2f}")
+    # Smooth vocal leveling and peak limiter with -1.2 dB true-peak headroom
+    filters.append("compand=attacks=0.03:decays=0.15:points=-80/-80|-36/-26|-12/-8|0/-2:gain=0")
+    filters.append("alimiter=limit=0.88:attack=5:release=50:asc=1")
+
+    af = ",".join(filters)
 
     try:
         cmd = [
@@ -157,6 +158,10 @@ def apply_emotion_mastering(
             "pipe:0",
             "-af",
             af,
+            "-b:a",
+            "256k",
+            "-q:a",
+            "0",
             "-f",
             "mp3",
             "pipe:1",
