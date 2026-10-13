@@ -130,15 +130,15 @@ class WhisperSTT:
             if not text:
                 continue
 
-            # 1. Metric filtering
-            if segment.no_speech_prob > 0.38:
+            # 1. Metric filtering (relaxed to preserve muffled, quiet or rapid user speech)
+            if segment.no_speech_prob > 0.55:
                 logger.debug(
                     "STT: Discarded segment due to no_speech_prob (%.2f): '%s'",
                     segment.no_speech_prob,
                     text,
                 )
                 continue
-            if segment.avg_logprob < -0.85:
+            if segment.avg_logprob < -1.20:
                 logger.debug(
                     "STT: Discarded segment due to low avg_logprob (%.2f): '%s'",
                     segment.avg_logprob,

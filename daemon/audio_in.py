@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import deque
 from typing import Any
 
@@ -31,6 +32,7 @@ class AudioInManager:
 
         self._vad_model: Any = None
         self._is_speaking_tts = False
+        self._playback_start_ts = 0.0
         self._running = False
         self._stream: sd.InputStream | None = None
         self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue()
@@ -48,6 +50,7 @@ class AudioInManager:
 
     async def _on_playback_started(self, event: PlaybackStarted) -> None:
         self._is_speaking_tts = True
+        self._playback_start_ts = time.time()
 
     async def _on_playback_ended(self, event: PlaybackEnded) -> None:
         self._preroll_buffer.clear()
@@ -171,10 +174,19 @@ class AudioInManager:
                     active_speech_frames = 0
                 continue
 
-            # Compute threshold (boost during TTS speech for strict echo rejection)
+            # Calculate RMS energy of current frame to detect voice intensity vs quiet background
+            frame_rms = float(np.sqrt(np.mean(frame**2)))
+
+            # Compute threshold and required frames (much stricter during TTS speech for barge-in)
             base_threshold = self.cfg.vad_threshold
-            threshold = 0.94 if self._is_speaking_tts else base_threshold
-            required_frames = 5 if self._is_speaking_tts else consecutive_required
+            if self._is_speaking_tts:
+                threshold = 0.96
+                required_frames = 14  # ~448ms of sustained intentional voice
+                min_rms = 0.022  # Must be audible spoken voice, not quiet keystrokes/creaks
+            else:
+                threshold = base_threshold
+                required_frames = consecutive_required
+                min_rms = 0.010
 
             # Evaluate VAD probability
             tensor_frame = torch.from_numpy(frame)
@@ -183,13 +195,21 @@ class AudioInManager:
             except (RuntimeError, ValueError):
                 prob = 0.0
 
+            # Check initial immunity window during playback start to absorb speaker/DAC transients
+            in_playback_grace = self._is_speaking_tts and (
+                time.time() - self._playback_start_ts < 0.35
+            )
+            is_valid_speech_frame = (
+                (prob >= threshold) and (frame_rms >= min_rms) and not in_playback_grace
+            )
+
             if not is_in_speech:
                 if self._is_speaking_tts:
                     self._preroll_buffer.clear()
                 else:
                     self._preroll_buffer.append(frame)
 
-                if prob >= threshold:
+                if is_valid_speech_frame:
                     consecutive_speech_frames += 1
                 else:
                     consecutive_speech_frames = 0
@@ -204,8 +224,9 @@ class AudioInManager:
                     self._preroll_buffer.clear()
 
                     logger.debug(
-                        "VAD: User speech started (prob=%.2f, tts_active=%s)",
+                        "VAD: User speech started (prob=%.2f, rms=%.4f, tts_active=%s)",
                         prob,
+                        frame_rms,
                         self._is_speaking_tts,
                     )
                     await self.bus.publish(UserSpeechStart())
@@ -213,7 +234,7 @@ class AudioInManager:
             else:
                 speech_frames.append(frame)
 
-                if prob >= threshold:
+                if (prob >= threshold) and (frame_rms >= (min_rms * 0.7)):
                     active_speech_frames += 1
                     silence_duration_ms = 0.0
                 else:

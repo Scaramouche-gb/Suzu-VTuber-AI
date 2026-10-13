@@ -192,3 +192,29 @@ async def test_conductor_sentence_capping_dialogue_and_proactive() -> None:
 
     await conductor.close()
 
+
+@pytest.mark.asyncio
+async def test_conductor_deduction_on_empty_and_fragment_speech() -> None:
+    from daemon.bus import UserSpeech
+
+    cfg = Config()
+    bus = EventBus()
+    ws_mock = MockWebSocketServer(cfg, bus)
+    llm = LLMClient(cfg.llm, dry_run=True)
+    conductor = Conductor(llm=llm, ws_server=ws_mock, bus=bus)
+
+    # 1. Empty text with speech duration >= 0.55s triggers context deduction
+    await conductor.handle_user_speech(UserSpeech(text="", duration_s=1.2))
+    assert len(conductor.history) >= 2
+    assert "неразборчиво" in conductor.history[0]["content"]
+
+    conductor.history.clear()
+
+    # 2. Fragmented text triggers context deduction enrichment
+    await conductor.handle_user_speech(UserSpeech(text="тест...", duration_s=0.9))
+    assert len(conductor.history) >= 2
+    assert "додумай мысль по экрану" in conductor.history[0]["content"]
+
+    await conductor.close()
+
+

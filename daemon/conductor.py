@@ -300,9 +300,39 @@ class Conductor:
 
         clean_text = text.strip()
         if clean_text:
+            # Check if user speech looks fragmented, cut off, or indistinct
+            tokens = [t for t in clean_text.split() if t.strip(".,!?-")]
+            is_fragment = (
+                len(tokens) <= 2
+                or clean_text.endswith(("...", "—"))
+                or any(
+                    clean_text.lower().startswith(p)
+                    for p in ("ну...", "это...", "как там...", "эээ", "ммм")
+                )
+            )
+            if is_fragment and (event.duration_s >= 0.75):
+                logger.info("[Conductor] User speech seems fragmented/cut off: '%s'", clean_text)
+                clean_text = (
+                    f"{clean_text} [запись голоса частично оборвана/смазана; "
+                    "додумай мысль по экрану и контексту беседы и ответь по сути]"
+                )
             await self.process_user_turn(clean_text, vad_stt_ms=vad_stt_ms, t_start=t_speech_end)
         else:
-            if self.state == "listening":
+            # Text was empty, but user definitely spoke for a noticeable duration
+            if event.duration_s >= 0.55:
+                logger.info(
+                    "[Conductor] User spoke (%.2fs) but STT returned empty; inferring from context",
+                    event.duration_s,
+                )
+                fallback_text = (
+                    "[Пользователь что-то сказал вслух, но микрофон записал неразборчиво. "
+                    "Додумай по открытому окну на экране и контексту последних фраз, о чём он говорит, "
+                    "и живо ответь прямо по сути, не переспрашивая]"
+                )
+                await self.process_user_turn(
+                    fallback_text, vad_stt_ms=vad_stt_ms, t_start=t_speech_end
+                )
+            elif self.state == "listening":
                 self.set_state("idle")
 
     async def handle_screen_change(self, event: ScreenChange) -> None:
